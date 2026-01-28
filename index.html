@@ -15,10 +15,84 @@
 <body>
   <div id="root"></div>
   <script>
+    // ================================
+    // Supabase設定
+    // ================================
+    const SUPABASE_URL = 'https://ivirmauzgzrxxljbadve.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml2aXJtYXV6Z3pyeHhsamJhZHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk1OTE3OTksImV4cCI6MjA4NTE2Nzc5OX0.fRKkUnw4nTDjxDpJS_ZT-TZZbz9FM9_Bx0vR5R7GB3w';
+
+    // Supabaseストレージ
     window.storage = {
-      async get(key) { const value = localStorage.getItem(key); return value ? { value } : null; },
-      async set(key, value) { localStorage.setItem(key, value); return { key, value }; },
-      async delete(key) { localStorage.removeItem(key); return { key, deleted: true }; }
+      dbId: null,
+      
+      async get(key) {
+        try {
+          const res = await fetch(`${SUPABASE_URL}/rest/v1/moai_groups?select=*&limit=1`, {
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+          });
+          const data = await res.json();
+          if (data && data.length > 0) {
+            this.dbId = data[0].id;
+            return { value: JSON.stringify({ groups: [data[0].data] }) };
+          }
+          return null;
+        } catch (e) {
+          console.error('Supabase GET error:', e);
+          // フォールバック: ローカルストレージ
+          const value = localStorage.getItem(key);
+          return value ? { value } : null;
+        }
+      },
+      
+      async set(key, value) {
+        try {
+          const parsed = JSON.parse(value);
+          const groupData = parsed.groups[0];
+          
+          if (this.dbId) {
+            // 更新
+            await fetch(`${SUPABASE_URL}/rest/v1/moai_groups?id=eq.${this.dbId}`, {
+              method: 'PATCH',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({ data: groupData })
+            });
+          } else {
+            // 新規作成
+            const res = await fetch(`${SUPABASE_URL}/rest/v1/moai_groups`, {
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=representation'
+              },
+              body: JSON.stringify({ data: groupData })
+            });
+            const data = await res.json();
+            if (data && data[0]) this.dbId = data[0].id;
+          }
+          // バックアップ
+          localStorage.setItem(key, value);
+          return { key, value };
+        } catch (e) {
+          console.error('Supabase SET error:', e);
+          localStorage.setItem(key, value);
+          return { key, value };
+        }
+      },
+      
+      async delete(key) {
+        localStorage.removeItem(key);
+        return { key, deleted: true };
+      }
     };
   </script>
   <script type="text/babel">
