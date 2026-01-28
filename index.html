@@ -25,16 +25,16 @@
 
 
 function MoaiManager() {
-  const [currentView, setCurrentView] = useState('dashboard');
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState(null);
-  const [showModal, setShowModal] = useState(null);
-  const [editingMember, setEditingMember] = useState(null);
-  const [editingEvent, setEditingEvent] = useState(null);
-  const [notification, setNotification] = useState(null);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [currentView, setCurrentView] = React.useState('dashboard');
+  const [isAdmin, setIsAdmin] = React.useState(false);
+  const [showLoginModal, setShowLoginModal] = React.useState(false);
+  const [groups, setGroups] = React.useState([]);
+  const [selectedGroup, setSelectedGroup] = React.useState(null);
+  const [showModal, setShowModal] = React.useState(null);
+  const [editingMember, setEditingMember] = React.useState(null);
+  const [editingEvent, setEditingEvent] = React.useState(null);
+  const [notification, setNotification] = React.useState(null);
+  const [selectedMonth, setSelectedMonth] = React.useState(new Date().toISOString().slice(0, 7));
 
   // プリセットデータ
   const createPresetData = () => ({
@@ -77,7 +77,7 @@ function MoaiManager() {
     auditLog: []
   });
 
-  useEffect(() => {
+  React.useEffect(() => {
     const loadData = async () => {
       try {
         const saved = await window.storage.get('moai-groups-v7');
@@ -111,7 +111,7 @@ function MoaiManager() {
     loadData();
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (groups.length > 0) window.storage.set('moai-groups-v7', JSON.stringify({ groups }));
   }, [groups]);
 
@@ -1156,7 +1156,7 @@ function Modal({ children, onClose }) {
 }
 
 function LoginForm({ onLogin, onCancel }) {
-  const [pw, setPw] = useState('');
+  const [pw, setPw] = React.useState('');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>🔐 管理者ログイン</h3>
@@ -1171,10 +1171,10 @@ function LoginForm({ onLogin, onCancel }) {
 }
 
 function PaymentForm({ group, month, payments, onSubmit, onCancel }) {
-  const [memberId, setMemberId] = useState('');
-  const [payMonth, setPayMonth] = useState(month);
-  const [amount, setAmount] = useState(group.monthlyAmount / 1000);
-  const [savings, setSavings] = useState(group.savingsAmount / 1000);
+  const [memberId, setMemberId] = React.useState('');
+  const [payMonth, setPayMonth] = React.useState(month);
+  const [amount, setAmount] = React.useState(group.monthlyAmount / 1000);
+  const [savings, setSavings] = React.useState(group.savingsAmount / 1000);
   const unpaid = group.members.filter(m => !payments.some(p => p.memberId === m.id && p.month === payMonth));
   return (
     <div style={S.form}>
@@ -1198,10 +1198,10 @@ function PaymentForm({ group, month, payments, onSubmit, onCancel }) {
 }
 
 function ReceiveForm({ group, month, notReceived, calculateAmount, onSubmit, onCancel }) {
-  const [winnerId, setWinnerId] = useState('');
-  const [recMonth, setRecMonth] = useState(month);
-  const [useCustomAmount, setUseCustomAmount] = useState(false);
-  const [customAmount, setCustomAmount] = useState('');
+  const [winnerId, setWinnerId] = React.useState('');
+  const [recMonth, setRecMonth] = React.useState(month);
+  const [useCustomAmount, setUseCustomAmount] = React.useState(false);
+  const [customAmount, setCustomAmount] = React.useState('');
   
   const calc = winnerId ? calculateAmount(winnerId) : { baseAmount: 0, offsetAmount: 0, finalAmount: 0 };
   const finalAmount = useCustomAmount ? (customAmount * 1000) : calc.finalAmount;
@@ -1304,7 +1304,7 @@ function ReceiveForm({ group, month, notReceived, calculateAmount, onSubmit, onC
 }
 
 function ReceiveRequestForm({ group, notReceived, onSubmit, onCancel }) {
-  const [memberId, setMemberId] = useState('');
+  const [memberId, setMemberId] = React.useState('');
   const existingRequests = (group.receiveRequests || []).map(r => r.memberId);
   // 未受取かつ希望未登録の人のみ表示
   const availableMembers = notReceived.filter(m => !existingRequests.includes(m.id));
@@ -1343,10 +1343,10 @@ function ReceiveRequestForm({ group, notReceived, onSubmit, onCancel }) {
 }
 
 function MemberForm({ member, onSubmit, onCancel }) {
-  const [name, setName] = useState(member?.name || '');
-  const [phone, setPhone] = useState(member?.phone || '');
-  const [carryOver, setCarryOver] = useState((member?.carryOver || 0) / 1000);
-  const [memo, setMemo] = useState(member?.memo || '');
+  const [name, setName] = React.useState(member?.name || '');
+  const [phone, setPhone] = React.useState(member?.phone || '');
+  const [carryOver, setCarryOver] = React.useState((member?.carryOver || 0) / 1000);
+  const [memo, setMemo] = React.useState(member?.memo || '');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>{member ? '✎ 編集' : '+ 追加'}</h3>
@@ -1363,8 +1363,8 @@ function MemberForm({ member, onSubmit, onCancel }) {
 }
 
 function BalanceForm({ onSubmit, onCancel }) {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [balance, setBalance] = useState('');
+  const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [balance, setBalance] = React.useState('');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>💳 残高記録</h3>
@@ -1379,9 +1379,9 @@ function BalanceForm({ onSubmit, onCancel }) {
 }
 
 function EventForm({ nextDate, onSubmit, onCancel }) {
-  const [date, setDate] = useState(nextDate || '');
-  const [time, setTime] = useState('19:00');
-  const [deadline, setDeadline] = useState('');
+  const [date, setDate] = React.useState(nextDate || '');
+  const [time, setTime] = React.useState('19:00');
+  const [deadline, setDeadline] = React.useState('');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>🍻 飲み会作成</h3>
@@ -1399,14 +1399,14 @@ function EventForm({ nextDate, onSubmit, onCancel }) {
 }
 
 function ExpenseForm({ event, members, onSubmit, onCancel }) {
-  const [total, setTotal] = useState('');
-  const [perPerson, setPerPerson] = useState('');
-  const [paidBy, setPaidBy] = useState('');
-  const [note, setNote] = useState('');
+  const [total, setTotal] = React.useState('');
+  const [perPerson, setPerPerson] = React.useState('');
+  const [paidBy, setPaidBy] = React.useState('');
+  const [note, setNote] = React.useState('');
   
   const yesCount = Object.values(event.attendance || {}).filter(v => v === 'yes').length;
   
-  useEffect(() => {
+  React.useEffect(() => {
     if (total && yesCount > 0) {
       setPerPerson(Math.ceil(+total / yesCount));
     }
@@ -1432,18 +1432,18 @@ function ExpenseForm({ event, members, onSubmit, onCancel }) {
 }
 
 function SettingsForm({ group, onSubmit, onChangePassword, onCancel }) {
-  const [name, setName] = useState(group.name);
-  const [monthlyAmount, setMonthlyAmount] = useState((group.monthlyAmount || 0) / 1000);
-  const [savingsAmount, setSavingsAmount] = useState((group.savingsAmount || 0) / 1000);
-  const [startMonth, setStartMonth] = useState(group.startMonth || '');
-  const [endMonth, setEndMonth] = useState(group.endMonth || '');
-  const [bankInfo, setBankInfo] = useState(group.bankInfo || '');
-  const [lineUrl, setLineUrl] = useState(group.lineGroupUrl || '');
-  const [scheduleType, setScheduleType] = useState(group.partySchedule?.type || 'none');
-  const [dayOfWeek, setDayOfWeek] = useState(group.partySchedule?.dayOfWeek || 6);
-  const [weekOfMonth, setWeekOfMonth] = useState(group.partySchedule?.weekOfMonth || 4);
-  const [newPw, setNewPw] = useState('');
-  const [showPwChange, setShowPwChange] = useState(false);
+  const [name, setName] = React.useState(group.name);
+  const [monthlyAmount, setMonthlyAmount] = React.useState((group.monthlyAmount || 0) / 1000);
+  const [savingsAmount, setSavingsAmount] = React.useState((group.savingsAmount || 0) / 1000);
+  const [startMonth, setStartMonth] = React.useState(group.startMonth || '');
+  const [endMonth, setEndMonth] = React.useState(group.endMonth || '');
+  const [bankInfo, setBankInfo] = React.useState(group.bankInfo || '');
+  const [lineUrl, setLineUrl] = React.useState(group.lineGroupUrl || '');
+  const [scheduleType, setScheduleType] = React.useState(group.partySchedule?.type || 'none');
+  const [dayOfWeek, setDayOfWeek] = React.useState(group.partySchedule?.dayOfWeek || 6);
+  const [weekOfMonth, setWeekOfMonth] = React.useState(group.partySchedule?.weekOfMonth || 4);
+  const [newPw, setNewPw] = React.useState('');
+  const [showPwChange, setShowPwChange] = React.useState(false);
 
   return (
     <div style={S.form}>
@@ -1562,8 +1562,8 @@ function ExportForm({ group, getMonthList, getMemberPaymentForMonth, getMemberBa
 
 // 積立金使用フォーム
 function SavingsUsageForm({ group, totalSavings, onSubmit, onCancel, onCancelUsage }) {
-  const [purpose, setPurpose] = useState('');
-  const [amount, setAmount] = useState('');
+  const [purpose, setPurpose] = React.useState('');
+  const [amount, setAmount] = React.useState('');
   const usageHistory = (group.savingsUsage || []).filter(u => u.status !== 'deleted');
   
   return (
@@ -1651,7 +1651,7 @@ ${unpaidNames}
 
 // 滞納者催促メッセージ
 function DelinquentReminderModal({ group, delinquents, onClose, notify }) {
-  const [selectedMember, setSelectedMember] = useState(delinquents[0]?.id || '');
+  const [selectedMember, setSelectedMember] = React.useState(delinquents[0]?.id || '');
   const member = delinquents.find(d => d.id === selectedMember);
   
   const message = member ? `${member.name}さん
@@ -1759,7 +1759,7 @@ function ReceiveOrderModal({ group, receiveOrder, onClose }) {
 }
 
 function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, isAdmin }) {
-  const [selected, setSelected] = useState([]);
+  const [selected, setSelected] = React.useState([]);
   const status = getMonthlyStatus(month);
   const toggle = (id) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
@@ -1801,11 +1801,11 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
 }
 
 function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
-  const [selectedMemberId, setSelectedMemberId] = useState(group.members[0]?.id || '');
-  const [showAddVenue, setShowAddVenue] = useState(false);
-  const [showPastVenues, setShowPastVenues] = useState(false);
-  const [newVenue, setNewVenue] = useState({ name: '', address: '', url: '', budget: '' });
-  const [photoUrl, setPhotoUrl] = useState('');
+  const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
+  const [showAddVenue, setShowAddVenue] = React.useState(false);
+  const [showPastVenues, setShowPastVenues] = React.useState(false);
+  const [newVenue, setNewVenue] = React.useState({ name: '', address: '', url: '', budget: '' });
+  const [photoUrl, setPhotoUrl] = React.useState('');
 
   if (!currentEvent) {
     return (
