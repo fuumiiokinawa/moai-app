@@ -22,12 +22,22 @@
 <body>
   <div id="root"></div>
   
+  <!-- ローカルストレージ用のwindow.storage互換レイヤー -->
   <script>
-    // ================================
-    // ⚠️ ここにSupabaseの設定を入力 ⚠️
-    // ================================
-    window.SUPABASE_URL = 'https://ivirmauzgzrxxljbadve.supabase.co';  // 例: https://xxxxxxxx.supabase.co
-    window.SUPABASE_ANON_KEY = 'sb_publishable_WXBAFaLBkfJJaJcawKL7rg_ItuYAKEO';  // 例: eyJhbGciOiJIUzI1NiIsInR5cCI6...
+    window.storage = {
+      async get(key) {
+        const value = localStorage.getItem(key);
+        return value ? { value } : null;
+      },
+      async set(key, value) {
+        localStorage.setItem(key, value);
+        return { key, value };
+      },
+      async delete(key) {
+        localStorage.removeItem(key);
+        return { key, deleted: true };
+      }
+    };
   </script>
   
   <script type="text/babel" src="moai-app.jsx"></script>
