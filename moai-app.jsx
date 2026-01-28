@@ -1,0 +1,2249 @@
+import React, { useState, useEffect, useMemo } from 'react';
+
+// Supabase設定（環境変数またはここに直接記入）
+const SUPABASE_URL = typeof window !== 'undefined' && window.SUPABASE_URL || 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = typeof window !== 'undefined' && window.SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
+
+// シンプルなSupabaseクライアント
+const supabase = {
+  async fetch(table, method = 'GET', body = null, id = null) {
+    const url = id 
+      ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`
+      : `${SUPABASE_URL}/rest/v1/${table}`;
+    
+    const headers = {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'POST' ? 'return=representation' : undefined
+    };
+    
+    const options = { method, headers: Object.fromEntries(Object.entries(headers).filter(([_, v]) => v)) };
+    if (body) options.body = JSON.stringify(body);
+    
+    const res = await fetch(url, options);
+    if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
+    return method === 'DELETE' ? null : res.json();
+  },
+  
+  async getGroup() {
+    const data = await this.fetch('moai_groups', 'GET');
+    return data?.[0] || null;
+  },
+  
+  async saveGroup(groupData, existingId = null) {
+    if (existingId) {
+      await this.fetch('moai_groups', 'PATCH', { data: groupData }, existingId);
+    } else {
+      await this.fetch('moai_groups', 'POST', { data: groupData });
+    }
+  }
+};
+
+export default function MoaiManager() {
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [groups, setGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [showModal, setShowModal] = useState(null);
+  const [editingMember, setEditingMember] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [dbRecordId, setDbRecordId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState(null);
+
+  // プリセットデータ
+  const createPresetData = () => ({
+    id: 'preset-moai-1',
+    name: '模合グループ',
+    adminPassword: '1234', // 初期パスワード
+    monthlyAmount: 10000,
+    savingsAmount: 2000,
+    startMonth: '2026-03',
+    endMonth: '2027-05',
+    bankInfo: 'ゆうちょ銀行 0520405',
+    lineGroupUrl: '',
+    partySchedule: { type: 'none', dayOfWeek: 6, weekOfMonth: 4 }, // 定期開催設定
+    createdAt: new Date().toISOString(),
+    currentBalance: 1598749,
+    members: [
+      { id: 'p1', name: 'デストロイヤー', phone: '', carryOver: 1270658, memo: '' },
+      { id: 'p2', name: '下地 敦', phone: '', carryOver: 0, memo: '' },
+      { id: 'p3', name: '川上 達也', phone: '', carryOver: 0, memo: '' },
+      { id: 'p4', name: '西 勝治', phone: '', carryOver: 0, memo: '' },
+      { id: 'p5', name: '文平 太一朗', phone: '', carryOver: 0, memo: '' },
+      { id: 'p6', name: '宮平 敬次', phone: '', carryOver: 0, memo: '' },
+      { id: 'p7', name: '中西 圭', phone: '', carryOver: 0, memo: '' },
+      { id: 'p8', name: '多嘉山 勲', phone: '', carryOver: 0, memo: '' },
+      { id: 'p9', name: '真玉橋 裕也', phone: '', carryOver: 0, memo: '' },
+      { id: 'p10', name: '岡部 政嗣', phone: '', carryOver: 0, memo: '' },
+      { id: 'p11', name: '宮城 功太', phone: '', carryOver: 0, memo: '' },
+      { id: 'p12', name: '神原 史誠', phone: '', carryOver: 0, memo: '' },
+      { id: 'p13', name: '中根次 史', phone: '', carryOver: 0, memo: '' },
+      { id: 'p14', name: '金城 洲斗', phone: '', carryOver: 0, memo: '' },
+      { id: 'p15', name: 'ヤスヒ ヒラタ', phone: '', carryOver: 0, memo: '' },
+    ],
+    payments: [],
+    receives: [],
+    receiveRequests: [],
+    balanceHistory: [],
+    savingsUsage: [],
+    events: [],
+    pastVenues: [], // 過去の店舗履歴
+    auditLog: []
+  });
+
+  useEffect(() => {
+    const loadData = async () => {
+      setIsLoading(true);
+      try {
+        // Supabaseからデータ取得
+        const record = await supabase.getGroup();
+        
+        if (record?.data) {
+          setDbRecordId(record.id);
+          const groupData = record.data;
+          
+          // 自動アーカイブ処理
+          const today = new Date().toISOString().slice(0, 10);
+          const updatedEvents = (groupData.events || []).map(event => {
+            if (event.status !== 'completed' && event.date && event.date < today) {
+              return { ...event, status: 'completed', autoArchived: true };
+            }
+            return event;
+          });
+          const updatedGroup = { ...groupData, events: updatedEvents };
+          
+          setGroups([updatedGroup]);
+          setSelectedGroup(updatedGroup);
+        } else {
+          // 初回: プリセットデータを作成
+          const preset = createPresetData();
+          setGroups([preset]);
+          setSelectedGroup(preset);
+          // Supabaseに保存
+          await supabase.saveGroup(preset);
+          const newRecord = await supabase.getGroup();
+          if (newRecord) setDbRecordId(newRecord.id);
+        }
+      } catch (e) {
+        console.error('データ取得エラー:', e);
+        // オフライン時はローカルストレージから
+        try {
+          const local = localStorage.getItem('moai-backup');
+          if (local) {
+            const data = JSON.parse(local);
+            setGroups([data]);
+            setSelectedGroup(data);
+          } else {
+            const preset = createPresetData();
+            setGroups([preset]);
+            setSelectedGroup(preset);
+          }
+        } catch {
+          const preset = createPresetData();
+          setGroups([preset]);
+          setSelectedGroup(preset);
+        }
+        notify('オフラインモードで起動', 'error');
+      }
+      setIsLoading(false);
+    };
+    loadData();
+  }, []);
+
+  // データ変更時に自動保存
+  useEffect(() => {
+    if (groups.length === 0 || isLoading) return;
+    
+    const saveData = async () => {
+      setIsSaving(true);
+      try {
+        await supabase.saveGroup(groups[0], dbRecordId);
+        // ローカルバックアップも保存
+        localStorage.setItem('moai-backup', JSON.stringify(groups[0]));
+        setLastSaved(new Date());
+      } catch (e) {
+        console.error('保存エラー:', e);
+        // ローカルには保存
+        localStorage.setItem('moai-backup', JSON.stringify(groups[0]));
+        notify('クラウド保存失敗（ローカル保存済）', 'error');
+      }
+      setIsSaving(false);
+    };
+    
+    // デバウンス: 1秒後に保存
+    const timer = setTimeout(saveData, 1000);
+    return () => clearTimeout(timer);
+  }, [groups]);
+
+  const notify = (msg, type = 'success') => {
+    setNotification({ msg, type });
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  const updateGroup = (updated) => {
+    const newGroups = groups.map(g => g.id === updated.id ? updated : g);
+    setGroups(newGroups);
+    setSelectedGroup(updated);
+  };
+
+  const addLog = (action, details, group) => ({
+    ...group,
+    auditLog: [...(group.auditLog || []), { id: `log-${Date.now()}`, action, details, timestamp: new Date().toISOString() }]
+  });
+
+  // ===== 管理者認証 =====
+  const handleLogin = (password) => {
+    if (password === selectedGroup?.adminPassword) {
+      setIsAdmin(true);
+      setShowLoginModal(false);
+      notify('ログインしました');
+    } else {
+      notify('パスワードが違います', 'error');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAdmin(false);
+    notify('ログアウトしました');
+  };
+
+  const handleChangePassword = (newPassword) => {
+    let updated = { ...selectedGroup, adminPassword: newPassword };
+    updated = addLog('パスワード変更', '管理者パスワードを変更', updated);
+    updateGroup(updated);
+    notify('パスワードを変更しました');
+    setShowModal(null);
+  };
+
+  // ===== 計算関数 =====
+  const getMonthList = () => {
+    if (!selectedGroup?.startMonth || !selectedGroup?.endMonth) return [];
+    const months = [];
+    let current = new Date(selectedGroup.startMonth + '-01');
+    const end = new Date(selectedGroup.endMonth + '-01');
+    while (current <= end) {
+      months.push(current.toISOString().slice(0, 7));
+      current.setMonth(current.getMonth() + 1);
+    }
+    return months;
+  };
+
+  const getActivePayments = () => selectedGroup?.payments?.filter(p => p.status !== 'deleted') || [];
+  const getActiveReceives = () => selectedGroup?.receives?.filter(r => r.status !== 'deleted') || [];
+
+  const getMemberBalance = (memberId) => {
+    if (!selectedGroup) return { balance: 0, unpaidMonths: [] };
+    const member = selectedGroup.members.find(m => m.id === memberId);
+    const carryOver = member?.carryOver || 0;
+    const monthList = getMonthList();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const dueMonths = monthList.filter(m => m <= currentMonth);
+    const payments = getActivePayments().filter(p => p.memberId === memberId);
+    const paidMonths = payments.map(p => p.month);
+    const receiveMonths = getActiveReceives().filter(r => r.winnerId === memberId).map(r => r.month);
+    const allPaidMonths = [...new Set([...paidMonths, ...receiveMonths])];
+    const unpaidMonths = dueMonths.filter(m => !allPaidMonths.includes(m));
+    const totalDue = dueMonths.length * (selectedGroup.monthlyAmount + selectedGroup.savingsAmount);
+    const totalPaid = payments.reduce((sum, p) => sum + p.amount + p.savings, 0) + carryOver;
+    return { balance: totalPaid - totalDue, unpaidMonths, paidCount: payments.length };
+  };
+
+  const getMonthlyStatus = (month) => {
+    if (!selectedGroup) return { paid: [], unpaid: [], total: 0 };
+    const payments = getActivePayments().filter(p => p.month === month);
+    const paidIds = payments.map(p => p.memberId);
+    const receiveWinners = getActiveReceives().filter(r => r.month === month).map(r => r.winnerId);
+    const allPaidIds = [...new Set([...paidIds, ...receiveWinners])];
+    return {
+      paid: selectedGroup.members.filter(m => allPaidIds.includes(m.id)),
+      unpaid: selectedGroup.members.filter(m => !allPaidIds.includes(m.id)),
+      total: payments.reduce((sum, p) => sum + p.amount + p.savings, 0)
+    };
+  };
+
+  const getTotalSavings = () => {
+    const collected = getActivePayments().reduce((sum, p) => sum + (p.savings || 0), 0);
+    const used = (selectedGroup?.savingsUsage || []).filter(u => u.status !== 'deleted').reduce((sum, u) => sum + u.amount, 0);
+    return collected - used;
+  };
+
+  const getTotalUnpaid = () => {
+    if (!selectedGroup) return 0;
+    return selectedGroup.members.reduce((sum, m) => {
+      const bal = getMemberBalance(m.id);
+      return sum + (bal.balance < 0 ? Math.abs(bal.balance) : 0);
+    }, 0);
+  };
+
+  const getMembersNotReceived = () => {
+    const receivedIds = getActiveReceives().map(r => r.winnerId);
+    return selectedGroup?.members?.filter(m => !receivedIds.includes(m.id)) || [];
+  };
+
+  const calculateReceiveAmount = (memberId) => {
+    const baseAmount = selectedGroup.monthlyAmount * selectedGroup.members.length;
+    const bal = getMemberBalance(memberId);
+    const offsetAmount = bal.balance < 0 ? Math.abs(bal.balance) : 0;
+    return { baseAmount, offsetAmount, finalAmount: baseAmount - offsetAmount };
+  };
+
+  // 模合の進捗情報
+  const getProgressInfo = () => {
+    const monthList = getMonthList();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const passedMonths = monthList.filter(m => m <= currentMonth).length;
+    const totalMonths = monthList.length;
+    const receiveCount = getActiveReceives().length;
+    const remainingReceives = selectedGroup?.members?.length - receiveCount;
+    return {
+      currentRound: passedMonths,
+      totalRounds: totalMonths,
+      progressPercent: totalMonths > 0 ? Math.round((passedMonths / totalMonths) * 100) : 0,
+      receiveCount,
+      remainingReceives: Math.max(0, remainingReceives)
+    };
+  };
+
+  // 滞納者リスト（何ヶ月滞納しているか）
+  const getDelinquentMembers = () => {
+    if (!selectedGroup) return [];
+    return selectedGroup.members
+      .map(m => {
+        const bal = getMemberBalance(m.id);
+        return {
+          ...m,
+          unpaidMonths: bal.unpaidMonths.length,
+          unpaidAmount: bal.balance < 0 ? Math.abs(bal.balance) : 0,
+          unpaidMonthsList: bal.unpaidMonths
+        };
+      })
+      .filter(m => m.unpaidMonths > 0)
+      .sort((a, b) => b.unpaidMonths - a.unpaidMonths);
+  };
+
+  // 順番制の次の受取者（メンバー順）
+  const getNextReceiver = () => {
+    const notReceived = getMembersNotReceived();
+    if (notReceived.length === 0) return null;
+    // メンバーリストの順番で最初の未受取者
+    return selectedGroup.members.find(m => notReceived.some(nr => nr.id === m.id));
+  };
+
+  // 受取順リスト
+  const getReceiveOrder = () => {
+    const receives = getActiveReceives();
+    const receivedIds = receives.map(r => r.winnerId);
+    const received = receives.map((r, i) => {
+      const member = selectedGroup?.members?.find(m => m.id === r.winnerId);
+      return { order: i + 1, member, month: r.month, amount: r.amount, status: 'done' };
+    });
+    const notReceived = selectedGroup?.members?.filter(m => !receivedIds.includes(m.id)).map((m, i) => ({
+      order: receives.length + i + 1,
+      member: m,
+      month: null,
+      amount: null,
+      status: 'pending'
+    })) || [];
+    return [...received, ...notReceived];
+  };
+
+  // ストック金（プール金）の計算
+  const getPoolInfo = () => {
+    if (!selectedGroup) return { poolAmount: 0, availableCount: 0 };
+    
+    const monthList = getMonthList();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const passedMonths = monthList.filter(m => m <= currentMonth);
+    
+    // 経過月数分の受取があるべき
+    const expectedReceives = passedMonths.length;
+    // 実際の受取回数
+    const actualReceives = getActiveReceives().length;
+    // 未消化の受取回数（ストック）
+    const pooledCount = expectedReceives - actualReceives;
+    
+    // 1回あたりの受取額（本体金額 × メンバー数）
+    const receivePerTime = selectedGroup.monthlyAmount * selectedGroup.members.length;
+    // ストック金額
+    const poolAmount = pooledCount * receivePerTime;
+    
+    return {
+      poolAmount: Math.max(0, poolAmount),
+      availableCount: Math.max(0, pooledCount),
+      receivePerTime
+    };
+  };
+
+  const getMemberPaymentForMonth = (memberId, month) => {
+    const payment = getActivePayments().find(p => p.memberId === memberId && p.month === month);
+    if (payment) return { status: 'paid', date: payment.recordedAt?.slice(5, 10).replace('-', '/') };
+    const receive = getActiveReceives().find(r => r.month === month && r.winnerId === memberId);
+    if (receive) return { status: 'offset' };
+    return { status: 'unpaid' };
+  };
+
+  // 次回開催日の自動提案
+  const getNextPartyDate = () => {
+    const schedule = selectedGroup?.partySchedule;
+    if (!schedule || schedule.type === 'none') return null;
+    
+    const now = new Date();
+    let year = now.getFullYear();
+    let month = now.getMonth();
+    
+    // 次の月から探す
+    for (let i = 0; i < 3; i++) {
+      month++;
+      if (month > 11) { month = 0; year++; }
+      
+      // 第N週のX曜日を計算
+      const firstDay = new Date(year, month, 1);
+      const dayOfWeek = schedule.dayOfWeek; // 0=日, 6=土
+      const weekOfMonth = schedule.weekOfMonth; // 1-4, -1=最終
+      
+      let targetDate;
+      if (weekOfMonth === -1) {
+        // 最終週
+        const lastDay = new Date(year, month + 1, 0);
+        let d = lastDay.getDate();
+        while (new Date(year, month, d).getDay() !== dayOfWeek) d--;
+        targetDate = new Date(year, month, d);
+      } else {
+        // 第N週
+        let count = 0;
+        for (let d = 1; d <= 31; d++) {
+          const date = new Date(year, month, d);
+          if (date.getMonth() !== month) break;
+          if (date.getDay() === dayOfWeek) {
+            count++;
+            if (count === weekOfMonth) {
+              targetDate = date;
+              break;
+            }
+          }
+        }
+      }
+      
+      if (targetDate && targetDate > now) {
+        return targetDate.toISOString().slice(0, 10);
+      }
+    }
+    return null;
+  };
+
+  // 抽選機能（受取希望者優先、受取済み除外）
+  const handleLottery = () => {
+    const notReceived = getMembersNotReceived();
+    if (notReceived.length === 0) {
+      notify('全員受取済みです', 'error');
+      return null;
+    }
+    
+    // 受取希望を出している未受取者をフィルタリング
+    const requests = selectedGroup.receiveRequests || [];
+    const requestMemberIds = requests.map(r => r.memberId);
+    const notReceivedWithRequest = notReceived.filter(m => requestMemberIds.includes(m.id));
+    
+    let winner;
+    if (notReceivedWithRequest.length > 0) {
+      // 受取希望者がいれば、その中からランダム抽選
+      winner = notReceivedWithRequest[Math.floor(Math.random() * notReceivedWithRequest.length)];
+      notify(`🎲 抽選結果: ${winner.name}さん！（受取希望者から）`);
+    } else {
+      // 受取希望者がいなければ、未受取者全員からランダム抽選
+      winner = notReceived[Math.floor(Math.random() * notReceived.length)];
+      notify(`🎲 抽選結果: ${winner.name}さん！`);
+    }
+    
+    return winner;
+  };
+
+  // ===== ハンドラー =====
+  const handleBulkPayment = (memberIds, month) => {
+    let updated = { ...selectedGroup };
+    memberIds.forEach((memberId, idx) => {
+      updated.payments = [...updated.payments, {
+        id: `pay-${Date.now()}-${idx}`, memberId, month,
+        amount: selectedGroup.monthlyAmount, savings: selectedGroup.savingsAmount,
+        status: 'active', recordedAt: new Date().toISOString()
+      }];
+    });
+    updated = addLog('一括入金', `${month}: ${memberIds.length}名`, updated);
+    updateGroup(updated);
+    notify(`${memberIds.length}名の入金を記録`);
+    setShowModal(null);
+  };
+
+  const handlePayment = (data) => {
+    let updated = { ...selectedGroup, payments: [...selectedGroup.payments, { id: `pay-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }] };
+    updated = addLog('入金', `${data.month}`, updated);
+    updateGroup(updated);
+    notify('入金を記録しました');
+    setShowModal(null);
+  };
+
+  const handleReceive = (data) => {
+    let updated = { ...selectedGroup, receives: [...selectedGroup.receives, { id: `rec-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }] };
+    // 受取希望があれば削除
+    updated.receiveRequests = (updated.receiveRequests || []).filter(r => r.memberId !== data.winnerId);
+    updated = addLog('受取', `¥${data.amount.toLocaleString()}`, updated);
+    updateGroup(updated);
+    notify('受取を記録しました');
+    setShowModal(null);
+  };
+
+  // 入金取消（論理削除）
+  const handleCancelPayment = (paymentId) => {
+    if (!confirm('この入金を取り消しますか？\n（履歴には残ります）')) return;
+    const payment = selectedGroup.payments.find(p => p.id === paymentId);
+    const member = selectedGroup.members.find(m => m.id === payment?.memberId);
+    let updated = {
+      ...selectedGroup,
+      payments: selectedGroup.payments.map(p => p.id === paymentId ? { ...p, status: 'deleted', deletedAt: new Date().toISOString() } : p)
+    };
+    updated = addLog('入金取消', `${payment?.month} ${member?.name}`, updated);
+    updateGroup(updated);
+    notify('入金を取り消しました');
+  };
+
+  // 受取取消（論理削除）
+  const handleCancelReceive = (receiveId) => {
+    if (!confirm('この受取を取り消しますか？\n（履歴には残ります）')) return;
+    const receive = selectedGroup.receives.find(r => r.id === receiveId);
+    const member = selectedGroup.members.find(m => m.id === receive?.winnerId);
+    let updated = {
+      ...selectedGroup,
+      receives: selectedGroup.receives.map(r => r.id === receiveId ? { ...r, status: 'deleted', deletedAt: new Date().toISOString() } : r)
+    };
+    updated = addLog('受取取消', `${receive?.month} ${member?.name}`, updated);
+    updateGroup(updated);
+    notify('受取を取り消しました');
+  };
+
+  const handleReceiveRequest = (data) => {
+    // 既に希望を出していないかチェック
+    const existing = (selectedGroup.receiveRequests || []).find(r => r.memberId === data.memberId);
+    if (existing) {
+      notify('この人は既に受取希望を登録済みです', 'error');
+      return;
+    }
+    const member = selectedGroup.members.find(m => m.id === data.memberId);
+    let updated = { ...selectedGroup, receiveRequests: [...(selectedGroup.receiveRequests || []), { id: `req-${Date.now()}`, ...data, createdAt: new Date().toISOString() }] };
+    updated = addLog('受取希望', member?.name, updated);
+    updateGroup(updated);
+    notify('受取希望を登録しました');
+    setShowModal(null);
+  };
+
+  const handleAddMember = (data) => {
+    let updated = { ...selectedGroup, members: [...selectedGroup.members, { id: `mem-${Date.now()}`, ...data, carryOver: (data.carryOver || 0) * 1000 }] };
+    updated = addLog('メンバー追加', data.name, updated);
+    updateGroup(updated);
+    notify('追加しました');
+    setShowModal(null);
+  };
+
+  const handleEditMember = (data) => {
+    let updated = { ...selectedGroup, members: selectedGroup.members.map(m => m.id === editingMember.id ? { ...m, ...data, carryOver: (data.carryOver || 0) * 1000 } : m) };
+    updated = addLog('メンバー編集', data.name, updated);
+    updateGroup(updated);
+    setEditingMember(null);
+    notify('更新しました');
+    setShowModal(null);
+  };
+
+  const handleDeleteMember = (id) => {
+    if (!confirm('削除しますか？')) return;
+    const member = selectedGroup.members.find(m => m.id === id);
+    let updated = { ...selectedGroup, members: selectedGroup.members.filter(m => m.id !== id) };
+    updated = addLog('メンバー削除', member?.name, updated);
+    updateGroup(updated);
+    notify('削除しました');
+  };
+
+  const handleUpdateGroup = (data) => {
+    let updated = { ...selectedGroup, ...data };
+    updated = addLog('設定変更', '', updated);
+    updateGroup(updated);
+    notify('更新しました');
+    setShowModal(null);
+  };
+
+  const handleBalanceRecord = (data) => {
+    let updated = { ...selectedGroup, balanceHistory: [...(selectedGroup.balanceHistory || []), { id: `bal-${Date.now()}`, ...data }], currentBalance: data.balance };
+    updated = addLog('残高記録', `¥${data.balance.toLocaleString()}`, updated);
+    updateGroup(updated);
+    notify('残高を記録');
+    setShowModal(null);
+  };
+
+  // 積立金使用
+  const handleUseSavings = (data) => {
+    let updated = {
+      ...selectedGroup,
+      savingsUsage: [...(selectedGroup.savingsUsage || []), { id: `sav-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }]
+    };
+    updated = addLog('積立金使用', `${data.purpose}: ¥${data.amount.toLocaleString()}`, updated);
+    updateGroup(updated);
+    notify('積立金使用を記録しました');
+    setShowModal(null);
+  };
+
+  // 積立金使用取消
+  const handleCancelSavingsUsage = (usageId) => {
+    if (!confirm('この積立金使用を取り消しますか？')) return;
+    const usage = (selectedGroup.savingsUsage || []).find(u => u.id === usageId);
+    let updated = {
+      ...selectedGroup,
+      savingsUsage: (selectedGroup.savingsUsage || []).map(u => u.id === usageId ? { ...u, status: 'deleted', deletedAt: new Date().toISOString() } : u)
+    };
+    updated = addLog('積立金使用取消', usage?.purpose, updated);
+    updateGroup(updated);
+    notify('取り消しました');
+  };
+
+  // ===== 飲み会関連 =====
+  const handleCreateEvent = (data) => {
+    const newEvent = {
+      id: `evt-${Date.now()}`, ...data,
+      venues: [], attendance: {}, venueVotes: {},
+      status: 'voting', confirmedVenue: null,
+      deadline: data.deadline || null,
+      expense: null, photos: [],
+      createdAt: new Date().toISOString()
+    };
+    let updated = { ...selectedGroup, events: [...(selectedGroup.events || []), newEvent] };
+    updated = addLog('飲み会作成', data.date, updated);
+    updateGroup(updated);
+    notify('飲み会を作成しました');
+    setShowModal(null);
+  };
+
+  const handleAddVenue = (eventId, venue) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, venues: [...e.venues, { id: `ven-${Date.now()}`, ...venue }] } : e)
+    };
+    updateGroup(updated);
+    notify('店舗を追加');
+  };
+
+  const handleAddVenueFromPast = (eventId, pastVenue) => {
+    handleAddVenue(eventId, { ...pastVenue, id: undefined });
+  };
+
+  const handleDeleteVenue = (eventId, venueId) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, venues: e.venues.filter(v => v.id !== venueId) } : e)
+    };
+    updateGroup(updated);
+  };
+
+  const handleAttendanceVote = (eventId, memberId, vote) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, attendance: { ...e.attendance, [memberId]: vote } } : e)
+    };
+    updateGroup(updated);
+  };
+
+  const handleVenueVote = (eventId, memberId, venueId) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, venueVotes: { ...e.venueVotes, [memberId]: venueId } } : e)
+    };
+    updateGroup(updated);
+  };
+
+  const handleConfirmEvent = (eventId, venueId) => {
+    const event = selectedGroup.events.find(e => e.id === eventId);
+    const venue = event?.venues.find(v => v.id === venueId);
+    
+    // 過去店舗に追加
+    const existsInPast = (selectedGroup.pastVenues || []).some(v => v.name === venue.name);
+    let updated = { ...selectedGroup };
+    if (!existsInPast && venue) {
+      updated.pastVenues = [...(updated.pastVenues || []), { id: `pv-${Date.now()}`, name: venue.name, address: venue.address, url: venue.url, budget: venue.budget, usedCount: 1, lastUsed: new Date().toISOString() }];
+    } else if (venue) {
+      updated.pastVenues = (updated.pastVenues || []).map(v => v.name === venue.name ? { ...v, usedCount: (v.usedCount || 0) + 1, lastUsed: new Date().toISOString() } : v);
+    }
+    
+    updated.events = updated.events.map(e => e.id === eventId ? { ...e, status: 'confirmed', confirmedVenue: venueId } : e);
+    updated = addLog('予約確定', venue?.name, updated);
+    updateGroup(updated);
+    notify('予約を確定しました');
+  };
+
+  const handleCompleteEvent = (eventId) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, status: 'completed' } : e)
+    };
+    updateGroup(updated);
+    notify('飲み会を完了にしました');
+  };
+
+  // 飲み会会計記録
+  const handleRecordExpense = (eventId, expense) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, expense } : e)
+    };
+    updateGroup(updated);
+    notify('会計を記録しました');
+    setShowModal(null);
+  };
+
+  // 写真URL追加
+  const handleAddPhoto = (eventId, photoUrl) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, photos: [...(e.photos || []), { id: `ph-${Date.now()}`, url: photoUrl, addedAt: new Date().toISOString() }] } : e)
+    };
+    updateGroup(updated);
+    notify('写真を追加しました');
+  };
+
+  const getCurrentEvent = () => (selectedGroup?.events || []).find(e => e.status === 'voting' || e.status === 'confirmed');
+  const getPastEvents = () => (selectedGroup?.events || []).filter(e => e.status === 'completed').slice(-10);
+
+  if (isLoading || !selectedGroup) {
+    return (
+      <div style={S.loading}>
+        <div style={{textAlign: 'center'}}>
+          <div style={{fontSize: 48, marginBottom: 16}}>🌺</div>
+          <div style={{fontSize: 18, fontWeight: 600, color: '#0284c7'}}>模合</div>
+          <div style={{fontSize: 14, color: '#64748b', marginTop: 8}}>データを読み込み中...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={S.container}>
+      <header style={S.header}>
+        <div style={S.headerInner}>
+          <div style={S.logo}>
+            <span>🌺</span>
+            <span style={S.logoText}>模合</span>
+            {isSaving && <span style={{fontSize: 10, marginLeft: 8, opacity: 0.7}}>保存中...</span>}
+            {!isSaving && lastSaved && <span style={{fontSize: 10, marginLeft: 8, opacity: 0.7}}>☁️</span>}
+          </div>
+          {isAdmin ? (
+            <button style={S.adminBadge} onClick={handleLogout}>👑管理者 ログアウト</button>
+          ) : (
+            <button style={S.loginBadge} onClick={() => setShowLoginModal(true)}>🔓 ログイン</button>
+          )}
+        </div>
+      </header>
+
+      {notification && <div style={{...S.toast, backgroundColor: notification.type === 'success' ? '#10b981' : '#ef4444'}}>{notification.msg}</div>}
+
+      <main style={S.main}>
+        <div style={S.infoBadge}>
+          {selectedGroup.name} | 💰 ¥{(selectedGroup.currentBalance || 0).toLocaleString()}
+        </div>
+
+        <nav style={S.nav}>
+          {[
+            { id: 'dashboard', icon: '🏠', label: 'ホーム' },
+            { id: 'party', icon: '🍻', label: '飲み会' },
+            { id: 'members', icon: '👥', label: 'メンバー' },
+            { id: 'bulk', icon: '✅', label: '入金' },
+            { id: 'receive', icon: '🎯', label: '受取' },
+            { id: 'table', icon: '📊', label: '一覧' },
+            { id: 'history', icon: '📜', label: '履歴' },
+          ].map(t => (
+            <button key={t.id} style={{...S.navBtn, ...(currentView === t.id ? S.navActive : {})}} onClick={() => setCurrentView(t.id)}>
+              <span>{t.icon}</span><span style={S.navLabel}>{t.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* ダッシュボード */}
+        {currentView === 'dashboard' && (
+          <div style={S.view}>
+            {/* 進捗バー */}
+            {(() => {
+              const progress = getProgressInfo();
+              return (
+                <div style={S.card}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
+                    <span style={{fontSize: 14, fontWeight: 600}}>📈 模合の進捗</span>
+                    <span style={{fontSize: 14, color: '#64748b'}}>{progress.currentRound} / {progress.totalRounds}回目</span>
+                  </div>
+                  <div style={{background: '#e2e8f0', borderRadius: 8, height: 12, overflow: 'hidden'}}>
+                    <div style={{background: 'linear-gradient(90deg, #0ea5e9, #8b5cf6)', height: '100%', width: `${progress.progressPercent}%`, transition: 'width 0.3s'}}></div>
+                  </div>
+                  <div style={{display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12, color: '#64748b'}}>
+                    <span>受取済: {progress.receiveCount}名</span>
+                    <span>残り: {progress.remainingReceives}名</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={S.stats}>
+              <div style={S.stat}><div style={S.statLabel}>メンバー</div><div style={S.statVal}>{selectedGroup.members.length}</div></div>
+              <div style={S.stat}><div style={S.statLabel}>月額</div><div style={S.statVal}>¥{(selectedGroup.monthlyAmount + selectedGroup.savingsAmount)/1000}千</div></div>
+              <div style={S.stat}><div style={S.statLabel}>積立残</div><div style={S.statVal}>¥{(getTotalSavings()/1000).toFixed(0)}千</div></div>
+              <div style={{...S.stat, background: getTotalUnpaid() > 0 ? '#fef2f2' : '#ecfdf5'}}><div style={S.statLabel}>未払計</div><div style={{...S.statVal, color: getTotalUnpaid() > 0 ? '#dc2626' : '#10b981'}}>¥{(getTotalUnpaid()/1000).toFixed(0)}千</div></div>
+            </div>
+
+            {/* 未払いアラート */}
+            {(() => {
+              const delinquents = getDelinquentMembers();
+              const serious = delinquents.filter(d => d.unpaidMonths >= 2);
+              if (serious.length > 0) {
+                return (
+                  <div style={{background: '#fef2f2', border: '2px solid #fecaca', borderRadius: 14, padding: 16}}>
+                    <h4 style={{color: '#dc2626', fontSize: 15, fontWeight: 700, marginBottom: 10}}>⚠️ 滞納アラート</h4>
+                    {serious.map(m => (
+                      <div key={m.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #fecaca'}}>
+                        <span style={{fontWeight: 600}}>{m.name}</span>
+                        <div style={{textAlign: 'right'}}>
+                          <div style={{color: '#dc2626', fontWeight: 700}}>{m.unpaidMonths}ヶ月滞納</div>
+                          <div style={{fontSize: 12, color: '#b91c1c'}}>¥{(m.unpaidAmount/1000).toFixed(0)}千</div>
+                        </div>
+                      </div>
+                    ))}
+                    {isAdmin && (
+                      <button style={{...S.linkBtn, color: '#dc2626', marginTop: 8}} onClick={() => setShowModal('reminderLine')}>
+                        📱 催促メッセージを作成
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {getCurrentEvent() && (
+              <div style={S.partyBanner}>
+                <div>🍻 {getCurrentEvent().date} {getCurrentEvent().time}</div>
+                <button style={S.partyBannerBtn} onClick={() => setCurrentView('party')}>詳細 →</button>
+              </div>
+            )}
+
+            <div style={S.card}>
+              <h3 style={S.cardTitle}>📅 {selectedMonth.replace('-', '年')}月</h3>
+              <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+                <button 
+                  style={{...S.monthNavBtn, borderRadius: '10px 0 0 10px'}} 
+                  onClick={() => {
+                    const d = new Date(selectedMonth + '-01');
+                    d.setMonth(d.getMonth() - 1);
+                    setSelectedMonth(d.toISOString().slice(0, 7));
+                  }}
+                >◀</button>
+                <input type="month" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={{...S.input, flex: 1, borderRadius: 0, textAlign: 'center'}} />
+                <button 
+                  style={{...S.monthNavBtn, borderRadius: '0 10px 10px 0'}} 
+                  onClick={() => {
+                    const d = new Date(selectedMonth + '-01');
+                    d.setMonth(d.getMonth() + 1);
+                    setSelectedMonth(d.toISOString().slice(0, 7));
+                  }}
+                >▶</button>
+              </div>
+              {(() => {
+                const st = getMonthlyStatus(selectedMonth);
+                return <>
+                  <div style={S.row}><span>✅ 支払済</span><b>{st.paid.length}/{selectedGroup.members.length}</b></div>
+                  <div style={S.row}><span>⏳ 未払い</span><b style={{color: st.unpaid.length ? '#dc2626' : '#10b981'}}>{st.unpaid.length}名</b></div>
+                  {st.unpaid.length > 0 && <div style={S.unpaidBox}>{st.unpaid.map(m => m.name).join('、')}</div>}
+                </>;
+              })()}
+              {isAdmin && (
+                <button style={{...S.linkBtn, marginTop: 8}} onClick={() => setShowModal('paymentReminder')}>
+                  📱 入金リマインドを作成
+                </button>
+              )}
+            </div>
+
+            {isAdmin && (
+              <div style={S.quickBtns}>
+                <button style={S.qBtn} onClick={() => setShowModal('payment')}>💰入金</button>
+                <button style={{...S.qBtn, background: '#8b5cf6'}} onClick={() => setShowModal('receive')}>🎯受取</button>
+                <button style={{...S.qBtn, background: '#f59e0b'}} onClick={() => setShowModal('createEvent')}>🍻飲み会</button>
+                <button style={{...S.qBtn, background: '#10b981'}} onClick={() => setShowModal('savingsUsage')}>💎積立</button>
+              </div>
+            )}
+
+            {/* 次の受取者（順番制） */}
+            <div style={S.card}>
+              <h4 style={S.subTitle}>🔄 受取順</h4>
+              <div style={{fontSize: 13, color: '#64748b', marginBottom: 10}}>
+                メンバー順で次の受取者を表示
+              </div>
+              {(() => {
+                const nextReceiver = getNextReceiver();
+                if (!nextReceiver) {
+                  return <div style={{textAlign: 'center', color: '#10b981', fontWeight: 600}}>🎉 全員受取完了！</div>;
+                }
+                const calc = calculateReceiveAmount(nextReceiver.id);
+                return (
+                  <div style={{background: '#f0f9ff', padding: 14, borderRadius: 10, border: '2px solid #0ea5e9'}}>
+                    <div style={{fontSize: 12, color: '#0369a1'}}>次の受取者（順番制の場合）</div>
+                    <div style={{fontSize: 18, fontWeight: 700, color: '#0284c7', marginTop: 4}}>{nextReceiver.name}</div>
+                    <div style={{fontSize: 14, color: '#0369a1', marginTop: 4}}>受取予定額: ¥{(calc.finalAmount/1000).toFixed(0)}千</div>
+                  </div>
+                );
+              })()}
+              <button style={{...S.linkBtn, marginTop: 10}} onClick={() => setShowModal('receiveOrder')}>
+                📋 受取順一覧を見る
+              </button>
+            </div>
+
+            {isAdmin && (
+              <div style={S.card}>
+                <h4 style={S.subTitle}>🎲 受取者抽選</h4>
+                <div style={{fontSize: 14, color: '#64748b', marginBottom: 10}}>
+                  <div>未受取: {getMembersNotReceived().length}名</div>
+                  {(selectedGroup.receiveRequests || []).length > 0 ? (
+                    <div style={{color: '#f59e0b', marginTop: 6}}>
+                      📝 受取希望: {(selectedGroup.receiveRequests || []).filter(r => getMembersNotReceived().some(m => m.id === r.memberId)).length}名
+                      <span style={{fontSize: 12, marginLeft: 6}}>(優先抽選)</span>
+                    </div>
+                  ) : (
+                    // 受取希望者がいない場合はストック金を表示
+                    (() => {
+                      const pool = getPoolInfo();
+                      if (pool.availableCount > 0) {
+                        return (
+                          <div style={{marginTop: 10, padding: 14, background: '#fef3c7', borderRadius: 10}}>
+                            <div style={{color: '#92400e', fontWeight: 600, fontSize: 15}}>
+                              💰 ストック: ¥{(pool.poolAmount / 1000).toFixed(0)}千
+                            </div>
+                            <div style={{color: '#b45309', fontSize: 14, marginTop: 6}}>
+                              → 現在 <b>{pool.availableCount}名</b> が受取可能
+                            </div>
+                            <div style={{color: '#78350f', fontSize: 13, marginTop: 4}}>
+                              (1名あたり ¥{(pool.receivePerTime / 1000).toFixed(0)}千)
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()
+                  )}
+                </div>
+                <button style={S.lotteryBtn} onClick={handleLottery} disabled={getMembersNotReceived().length === 0}>
+                  🎲 抽選する
+                </button>
+                {isAdmin && (
+                  <button style={{...S.linkBtn, marginTop: 10, display: 'block'}} onClick={() => setShowModal('receiveRequest')}>
+                    + 受取希望を登録
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 積立金詳細 */}
+            <div style={S.card}>
+              <h4 style={S.subTitle}>💎 積立金</h4>
+              <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: 14}}>
+                <span>徴収済み</span>
+                <span>¥{(getActivePayments().reduce((sum, p) => sum + (p.savings || 0), 0) / 1000).toFixed(0)}千</span>
+              </div>
+              <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', fontSize: 14, color: '#dc2626'}}>
+                <span>使用済み</span>
+                <span>−¥{((selectedGroup?.savingsUsage || []).filter(u => u.status !== 'deleted').reduce((sum, u) => sum + u.amount, 0) / 1000).toFixed(0)}千</span>
+              </div>
+              <div style={{display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderTop: '2px solid #e2e8f0', fontSize: 16, fontWeight: 700}}>
+                <span>残高</span>
+                <span style={{color: '#10b981'}}>¥{(getTotalSavings() / 1000).toFixed(0)}千</span>
+              </div>
+              {(selectedGroup?.savingsUsage || []).filter(u => u.status !== 'deleted').length > 0 && (
+                <div style={{marginTop: 10}}>
+                  <div style={{fontSize: 12, color: '#64748b', marginBottom: 6}}>使用履歴</div>
+                  {(selectedGroup?.savingsUsage || []).filter(u => u.status !== 'deleted').slice(-3).reverse().map(u => (
+                    <div key={u.id} style={{display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, borderBottom: '1px solid #f1f5f9'}}>
+                      <span>{u.purpose}</span>
+                      <span>¥{(u.amount/1000).toFixed(0)}千</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 飲み会 */}
+        {currentView === 'party' && (
+          <PartyView
+            group={selectedGroup}
+            isAdmin={isAdmin}
+            currentEvent={getCurrentEvent()}
+            pastEvents={getPastEvents()}
+            getNextPartyDate={getNextPartyDate}
+            onCreateEvent={() => setShowModal('createEvent')}
+            onAddVenue={handleAddVenue}
+            onAddVenueFromPast={handleAddVenueFromPast}
+            onDeleteVenue={handleDeleteVenue}
+            onAttendanceVote={handleAttendanceVote}
+            onVenueVote={handleVenueVote}
+            onConfirmEvent={handleConfirmEvent}
+            onCompleteEvent={handleCompleteEvent}
+            onRecordExpense={(eventId) => { setEditingEvent(selectedGroup.events.find(e => e.id === eventId)); setShowModal('expense'); }}
+            onAddPhoto={handleAddPhoto}
+            notify={notify}
+          />
+        )}
+
+        {/* メンバー */}
+        {currentView === 'members' && (
+          <div style={S.view}>
+            <div style={S.viewHeader}>
+              <h3 style={S.viewTitle}>👥 メンバー</h3>
+              {isAdmin && <button style={S.addBtn} onClick={() => setShowModal('addMember')}>+</button>}
+            </div>
+            {selectedGroup.members.map((m, i) => {
+              const bal = getMemberBalance(m.id);
+              const receives = getActiveReceives().filter(r => r.winnerId === m.id);
+              return (
+                <div key={m.id} style={S.memberCard}>
+                  <div style={S.memberTop}>
+                    <div style={S.memberNum}>{i + 1}</div>
+                    <div style={S.memberInfo}>
+                      <div style={S.memberName}>{m.name}</div>
+                      {m.memo && <div style={S.memberMemo}>📝 {m.memo}</div>}
+                    </div>
+                    {isAdmin && (
+                      <div style={S.memberBtns}>
+                        <button style={S.editBtn} onClick={() => { setEditingMember(m); setShowModal('editMember'); }}>✎</button>
+                        <button style={S.delBtn} onClick={() => handleDeleteMember(m.id)}>×</button>
+                      </div>
+                    )}
+                  </div>
+                  <div style={S.memberStats}>
+                    <div><span style={S.mLabel}>残高</span><span style={{color: bal.balance >= 0 ? '#10b981' : '#dc2626', fontWeight: 700}}>¥{(bal.balance/1000).toFixed(0)}千</span></div>
+                    <div><span style={S.mLabel}>受取</span><span>{receives.length}回</span></div>
+                    <div><span style={S.mLabel}>未払</span><span style={{color: bal.unpaidMonths.length ? '#dc2626' : '#10b981'}}>{bal.unpaidMonths.length}ヶ月</span></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 一括入金 */}
+        {currentView === 'bulk' && (
+          <BulkPaymentView group={selectedGroup} month={selectedMonth} setMonth={setSelectedMonth} getMonthlyStatus={getMonthlyStatus} onSubmit={handleBulkPayment} isAdmin={isAdmin} />
+        )}
+
+        {/* 受取 */}
+        {currentView === 'receive' && (
+          <div style={S.view}>
+            <div style={S.viewHeader}>
+              <h3 style={S.viewTitle}>🎯 受取管理</h3>
+              {isAdmin && <button style={S.addBtn} onClick={() => setShowModal('receive')}>+</button>}
+            </div>
+            <div style={S.card}>
+              <h4 style={S.subTitle}>未受取 ({getMembersNotReceived().length}名)</h4>
+              {getMembersNotReceived().map(m => {
+                const calc = calculateReceiveAmount(m.id);
+                return <div key={m.id} style={S.notRecItem}><span>{m.name}</span><span style={{color: '#8b5cf6'}}>¥{(calc.finalAmount/1000).toFixed(0)}千</span></div>;
+              })}
+            </div>
+            <div style={S.card}>
+              <h4 style={S.subTitle}>受取履歴</h4>
+              {getActiveReceives().length === 0 ? <div style={S.empty}>履歴なし</div> : getActiveReceives().slice().reverse().map(r => {
+                const m = selectedGroup.members.find(x => x.id === r.winnerId);
+                return (
+                  <div key={r.id} style={{...S.histRow, alignItems: 'center'}}>
+                    <span>{r.month}</span>
+                    <span style={{flex: 1}}>{m?.name}</span>
+                    <span style={{color: '#8b5cf6', marginRight: 8}}>¥{(r.amount/1000).toFixed(0)}千</span>
+                    {isAdmin && <button style={S.cancelSmBtn} onClick={() => handleCancelReceive(r.id)}>取消</button>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 一覧表 */}
+        {currentView === 'table' && (
+          <div style={S.view}>
+            <div style={S.viewHeader}>
+              <h3 style={S.viewTitle}>📊 一覧表</h3>
+              <button style={S.exportBtn} onClick={() => setShowModal('export')}>📥</button>
+            </div>
+            <div style={S.tableWrap}>
+              <table style={S.table}>
+                <thead><tr>
+                  <th style={S.th}>No</th>
+                  <th style={{...S.th, minWidth: 70}}>名前</th>
+                  {getMonthList().map((m, i, arr) => {
+                    // 年が変わるタイミングか最初の月なら年も表示
+                    const showYear = i === 0 || m.slice(0, 4) !== arr[i - 1]?.slice(0, 4);
+                    const year = m.slice(2, 4); // 下2桁
+                    const month = m.slice(5);
+                    return <th key={m} style={S.th}>{showYear ? `${year}/` : ''}{month}</th>;
+                  })}
+                  <th style={{...S.th, background: '#fef3c7'}}>残高</th>
+                </tr></thead>
+                <tbody>
+                  {selectedGroup.members.map((m, i) => {
+                    const bal = getMemberBalance(m.id);
+                    return (
+                      <tr key={m.id}>
+                        <td style={S.td}>{i + 1}</td>
+                        <td style={{...S.td, textAlign: 'left', fontSize: 12}}>{m.name}</td>
+                        {getMonthList().map(month => {
+                          const info = getMemberPaymentForMonth(m.id, month);
+                          return <td key={month} style={{...S.td, background: info.status === 'paid' ? '#d1fae5' : info.status === 'offset' ? '#fef3c7' : '#fee2e2', fontSize: 11}}>{info.status === 'paid' ? '✓' : info.status === 'offset' ? '相' : ''}</td>;
+                        })}
+                        <td style={{...S.td, fontWeight: 700, color: bal.balance >= 0 ? '#059669' : '#dc2626'}}>{(bal.balance/1000).toFixed(0)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 履歴 */}
+        {currentView === 'history' && (
+          <div style={S.view}>
+            <h3 style={S.viewTitle}>📜 操作履歴</h3>
+            
+            {/* 入金履歴 */}
+            <div style={S.card}>
+              <h4 style={S.subTitle}>💰 入金履歴</h4>
+              {selectedGroup.payments.length === 0 ? (
+                <div style={S.empty}>履歴なし</div>
+              ) : (
+                selectedGroup.payments.slice().reverse().map(p => {
+                  const m = selectedGroup.members.find(x => x.id === p.memberId);
+                  const isDeleted = p.status === 'deleted';
+                  return (
+                    <div key={p.id} style={{...S.histRow, alignItems: 'center', opacity: isDeleted ? 0.5 : 1, background: isDeleted ? '#fef2f2' : 'transparent'}}>
+                      <span style={{fontSize: 12, color: '#64748b'}}>{p.recordedAt?.slice(0, 10)}</span>
+                      <span>{p.month}</span>
+                      <span style={{flex: 1}}>{m?.name || '不明'}</span>
+                      <span style={{color: '#0ea5e9', marginRight: 8}}>¥{((p.amount + p.savings)/1000).toFixed(0)}千</span>
+                      {isDeleted ? (
+                        <span style={{fontSize: 11, color: '#dc2626', padding: '2px 6px', background: '#fee2e2', borderRadius: 4}}>取消済</span>
+                      ) : (
+                        isAdmin && <button style={S.cancelSmBtn} onClick={() => handleCancelPayment(p.id)}>取消</button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 受取履歴 */}
+            <div style={S.card}>
+              <h4 style={S.subTitle}>🎯 受取履歴</h4>
+              {selectedGroup.receives.length === 0 ? (
+                <div style={S.empty}>履歴なし</div>
+              ) : (
+                selectedGroup.receives.slice().reverse().map(r => {
+                  const m = selectedGroup.members.find(x => x.id === r.winnerId);
+                  const isDeleted = r.status === 'deleted';
+                  return (
+                    <div key={r.id} style={{...S.histRow, alignItems: 'center', opacity: isDeleted ? 0.5 : 1, background: isDeleted ? '#fef2f2' : 'transparent'}}>
+                      <span style={{fontSize: 12, color: '#64748b'}}>{r.recordedAt?.slice(0, 10)}</span>
+                      <span>{r.month}</span>
+                      <span style={{flex: 1}}>{m?.name || '不明'}</span>
+                      <span style={{color: '#8b5cf6', marginRight: 8}}>¥{(r.amount/1000).toFixed(0)}千</span>
+                      {isDeleted ? (
+                        <span style={{fontSize: 11, color: '#dc2626', padding: '2px 6px', background: '#fee2e2', borderRadius: 4}}>取消済</span>
+                      ) : (
+                        isAdmin && <button style={S.cancelSmBtn} onClick={() => handleCancelReceive(r.id)}>取消</button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* 監査ログ */}
+            <div style={S.card}>
+              <h4 style={S.subTitle}>📋 監査ログ</h4>
+              <div style={{fontSize: 12, color: '#64748b', marginBottom: 10}}>
+                ※ この履歴は削除できません
+              </div>
+              {(selectedGroup.auditLog || []).length === 0 ? (
+                <div style={S.empty}>履歴なし</div>
+              ) : (
+                (selectedGroup.auditLog || []).slice().reverse().slice(0, 50).map(log => (
+                  <div key={log.id} style={{...S.histRow, fontSize: 13}}>
+                    <span style={{fontSize: 11, color: '#64748b', minWidth: 80}}>{log.timestamp?.slice(5, 16).replace('T', ' ')}</span>
+                    <span style={{fontWeight: 600, color: '#334155'}}>{log.action}</span>
+                    <span style={{flex: 1, color: '#64748b'}}>{log.details}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ログインモーダル */}
+      {showLoginModal && (
+        <Modal onClose={() => setShowLoginModal(false)}>
+          <LoginForm onLogin={handleLogin} onCancel={() => setShowLoginModal(false)} />
+        </Modal>
+      )}
+
+      {/* その他モーダル */}
+      {showModal && (
+        <Modal onClose={() => setShowModal(null)}>
+          {showModal === 'payment' && <PaymentForm group={selectedGroup} month={selectedMonth} payments={getActivePayments()} onSubmit={handlePayment} onCancel={() => setShowModal(null)} />}
+          {showModal === 'receive' && <ReceiveForm group={selectedGroup} month={selectedMonth} notReceived={getMembersNotReceived()} calculateAmount={calculateReceiveAmount} onSubmit={handleReceive} onCancel={() => setShowModal(null)} />}
+          {showModal === 'receiveRequest' && <ReceiveRequestForm group={selectedGroup} notReceived={getMembersNotReceived()} onSubmit={handleReceiveRequest} onCancel={() => setShowModal(null)} />}
+          {showModal === 'addMember' && <MemberForm onSubmit={handleAddMember} onCancel={() => setShowModal(null)} />}
+          {showModal === 'editMember' && <MemberForm member={editingMember} onSubmit={handleEditMember} onCancel={() => { setShowModal(null); setEditingMember(null); }} />}
+          {showModal === 'balance' && <BalanceForm onSubmit={handleBalanceRecord} onCancel={() => setShowModal(null)} />}
+          {showModal === 'createEvent' && <EventForm nextDate={getNextPartyDate()} onSubmit={handleCreateEvent} onCancel={() => setShowModal(null)} />}
+          {showModal === 'expense' && editingEvent && <ExpenseForm event={editingEvent} members={selectedGroup.members} onSubmit={(data) => handleRecordExpense(editingEvent.id, data)} onCancel={() => { setShowModal(null); setEditingEvent(null); }} />}
+          {showModal === 'settings' && <SettingsForm group={selectedGroup} onSubmit={handleUpdateGroup} onChangePassword={handleChangePassword} onCancel={() => setShowModal(null)} />}
+          {showModal === 'export' && <ExportForm group={selectedGroup} getMonthList={getMonthList} getMemberPaymentForMonth={getMemberPaymentForMonth} getMemberBalance={getMemberBalance} onCancel={() => setShowModal(null)} />}
+          {showModal === 'savingsUsage' && <SavingsUsageForm group={selectedGroup} totalSavings={getTotalSavings()} onSubmit={handleUseSavings} onCancel={() => setShowModal(null)} onCancelUsage={handleCancelSavingsUsage} />}
+          {showModal === 'paymentReminder' && <PaymentReminderModal group={selectedGroup} month={selectedMonth} status={getMonthlyStatus(selectedMonth)} onClose={() => setShowModal(null)} notify={notify} />}
+          {showModal === 'reminderLine' && <DelinquentReminderModal group={selectedGroup} delinquents={getDelinquentMembers()} onClose={() => setShowModal(null)} notify={notify} />}
+          {showModal === 'receiveOrder' && <ReceiveOrderModal group={selectedGroup} receiveOrder={getReceiveOrder()} onClose={() => setShowModal(null)} />}
+        </Modal>
+      )}
+
+      {/* 設定ボタン */}
+      {isAdmin && (
+        <button style={S.settingsFab} onClick={() => setShowModal('settings')}>⚙️</button>
+      )}
+    </div>
+  );
+}
+
+// ===== コンポーネント =====
+
+function Modal({ children, onClose }) {
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={e => e.stopPropagation()}>{children}</div>
+    </div>
+  );
+}
+
+function LoginForm({ onLogin, onCancel }) {
+  const [pw, setPw] = useState('');
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>🔐 管理者ログイン</h3>
+      <input type="password" placeholder="パスワード" value={pw} onChange={e => setPw(e.target.value)} style={S.input} autoFocus />
+      <div style={S.hint}>初期パスワード: 1234</div>
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onLogin(pw)}>ログイン</button>
+      </div>
+    </div>
+  );
+}
+
+function PaymentForm({ group, month, payments, onSubmit, onCancel }) {
+  const [memberId, setMemberId] = useState('');
+  const [payMonth, setPayMonth] = useState(month);
+  const [amount, setAmount] = useState(group.monthlyAmount / 1000);
+  const [savings, setSavings] = useState(group.savingsAmount / 1000);
+  const unpaid = group.members.filter(m => !payments.some(p => p.memberId === m.id && p.month === payMonth));
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>💰 入金</h3>
+      <input type="month" value={payMonth} onChange={e => setPayMonth(e.target.value)} style={S.input} />
+      <select value={memberId} onChange={e => setMemberId(e.target.value)} style={S.input}>
+        <option value="">メンバー選択</option>
+        {unpaid.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      <div style={S.row2}>
+        <input type="number" value={amount} onChange={e => setAmount(+e.target.value)} style={S.input} placeholder="本体(千円)" />
+        <input type="number" value={savings} onChange={e => setSavings(+e.target.value)} style={S.input} placeholder="積立(千円)" />
+      </div>
+      <div style={S.total}>合計: ¥{((amount + savings) * 1000).toLocaleString()}</div>
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ memberId, month: payMonth, amount: amount * 1000, savings: savings * 1000 })} disabled={!memberId}>記録</button>
+      </div>
+    </div>
+  );
+}
+
+function ReceiveForm({ group, month, notReceived, calculateAmount, onSubmit, onCancel }) {
+  const [winnerId, setWinnerId] = useState('');
+  const [recMonth, setRecMonth] = useState(month);
+  const [useCustomAmount, setUseCustomAmount] = useState(false);
+  const [customAmount, setCustomAmount] = useState('');
+  
+  const calc = winnerId ? calculateAmount(winnerId) : { baseAmount: 0, offsetAmount: 0, finalAmount: 0 };
+  const finalAmount = useCustomAmount ? (customAmount * 1000) : calc.finalAmount;
+  
+  // 受取済みかどうかをチェック
+  const receivedIds = (group.receives || []).filter(r => r.status !== 'deleted').map(r => r.winnerId);
+  const isReceived = (memberId) => receivedIds.includes(memberId);
+  
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>🎯 受取（払い出し）</h3>
+      
+      <label style={S.label}>📅 受取月</label>
+      <input type="month" value={recMonth} onChange={e => setRecMonth(e.target.value)} style={S.input} />
+      
+      <label style={S.label}>👤 受取者</label>
+      <select value={winnerId} onChange={e => { setWinnerId(e.target.value); setUseCustomAmount(false); }} style={S.input}>
+        <option value="">-- 選択してください --</option>
+        <optgroup label="🔴 未受取">
+          {notReceived.map(m => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </optgroup>
+        <optgroup label="✅ 受取済（2回目以降）">
+          {group.members.filter(m => isReceived(m.id)).map(m => (
+            <option key={m.id} value={m.id}>{m.name}（受取済）</option>
+          ))}
+        </optgroup>
+      </select>
+      
+      {winnerId && (
+        <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, marginTop: 8}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 14}}>
+            <span>基本額（{group.members.length}名 × ¥{(group.monthlyAmount/1000).toFixed(0)}千）</span>
+            <span style={{fontWeight: 600}}>¥{(calc.baseAmount/1000).toFixed(0)}千</span>
+          </div>
+          {calc.offsetAmount > 0 && (
+            <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 14, color: '#dc2626'}}>
+              <span>⚠️ 未払い分を相殺</span>
+              <span>−¥{(calc.offsetAmount/1000).toFixed(0)}千</span>
+            </div>
+          )}
+          <div style={{display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '2px solid #e2e8f0', fontSize: 16, fontWeight: 700}}>
+            <span>計算上の受取額</span>
+            <span style={{color: '#8b5cf6'}}>¥{(calc.finalAmount/1000).toFixed(0)}千</span>
+          </div>
+        </div>
+      )}
+      
+      <div style={{marginTop: 12}}>
+        <label style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, cursor: 'pointer'}}>
+          <input 
+            type="checkbox" 
+            checked={useCustomAmount} 
+            onChange={e => setUseCustomAmount(e.target.checked)}
+            style={{width: 20, height: 20}}
+          />
+          金額を手動で入力する
+        </label>
+      </div>
+      
+      {useCustomAmount && (
+        <div style={{marginTop: 8}}>
+          <label style={S.label}>💰 実際の受取額（千円）</label>
+          <input 
+            type="number" 
+            value={customAmount} 
+            onChange={e => setCustomAmount(e.target.value)} 
+            style={S.input} 
+            placeholder={`例: ${(calc.finalAmount/1000).toFixed(0)}`}
+          />
+        </div>
+      )}
+      
+      <div style={{...S.total, marginTop: 12, fontSize: 20}}>
+        受取額: ¥{(finalAmount/1000).toFixed(0)}千
+        <div style={{fontSize: 12, color: '#64748b', marginTop: 4}}>
+          （¥{finalAmount.toLocaleString()}）
+        </div>
+      </div>
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button 
+          style={S.submitBtn} 
+          onClick={() => onSubmit({ 
+            winnerId, 
+            month: recMonth, 
+            amount: finalAmount, 
+            baseAmount: calc.baseAmount,
+            offsetAmount: useCustomAmount ? 0 : calc.offsetAmount 
+          })} 
+          disabled={!winnerId || (useCustomAmount && !customAmount)}
+        >
+          記録する
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReceiveRequestForm({ group, notReceived, onSubmit, onCancel }) {
+  const [memberId, setMemberId] = useState('');
+  const existingRequests = (group.receiveRequests || []).map(r => r.memberId);
+  // 未受取かつ希望未登録の人のみ表示
+  const availableMembers = notReceived.filter(m => !existingRequests.includes(m.id));
+  
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📝 受取希望登録</h3>
+      <p style={{fontSize: 14, color: '#64748b', margin: '0 0 14px'}}>
+        抽選時に優先されます
+      </p>
+      {availableMembers.length === 0 ? (
+        <div style={S.empty}>登録可能なメンバーがいません</div>
+      ) : (
+        <>
+          <select value={memberId} onChange={e => setMemberId(e.target.value)} style={S.input}>
+            <option value="">メンバー選択</option>
+            {availableMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <div style={S.btnRow}>
+            <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+            <button style={S.submitBtn} onClick={() => onSubmit({ memberId })} disabled={!memberId}>登録</button>
+          </div>
+        </>
+      )}
+      {existingRequests.length > 0 && (
+        <div style={{marginTop: 18, padding: 14, background: '#fef3c7', borderRadius: 10}}>
+          <div style={{fontSize: 14, fontWeight: 600, marginBottom: 10}}>📝 現在の受取希望者</div>
+          {(group.receiveRequests || []).map(r => {
+            const m = group.members.find(x => x.id === r.memberId);
+            return <div key={r.id} style={{fontSize: 14, padding: '6px 0'}}>{m?.name}</div>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MemberForm({ member, onSubmit, onCancel }) {
+  const [name, setName] = useState(member?.name || '');
+  const [phone, setPhone] = useState(member?.phone || '');
+  const [carryOver, setCarryOver] = useState((member?.carryOver || 0) / 1000);
+  const [memo, setMemo] = useState(member?.memo || '');
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>{member ? '✎ 編集' : '+ 追加'}</h3>
+      <input type="text" value={name} onChange={e => setName(e.target.value)} style={S.input} placeholder="名前" />
+      <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} style={S.input} placeholder="電話番号" />
+      <input type="number" value={carryOver} onChange={e => setCarryOver(+e.target.value)} style={S.input} placeholder="繰越(千円)" />
+      <input type="text" value={memo} onChange={e => setMemo(e.target.value)} style={S.input} placeholder="メモ（例：来月不参加）" />
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ name, phone, carryOver, memo })} disabled={!name}>{member ? '更新' : '追加'}</button>
+      </div>
+    </div>
+  );
+}
+
+function BalanceForm({ onSubmit, onCancel }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [balance, setBalance] = useState('');
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>💳 残高記録</h3>
+      <input type="date" value={date} onChange={e => setDate(e.target.value)} style={S.input} />
+      <input type="number" value={balance} onChange={e => setBalance(e.target.value)} style={S.input} placeholder="残高(円)" />
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ date, balance: +balance })} disabled={!balance}>記録</button>
+      </div>
+    </div>
+  );
+}
+
+function EventForm({ nextDate, onSubmit, onCancel }) {
+  const [date, setDate] = useState(nextDate || '');
+  const [time, setTime] = useState('19:00');
+  const [deadline, setDeadline] = useState('');
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>🍻 飲み会作成</h3>
+      {nextDate && <div style={S.hint}>💡 提案日: {nextDate}</div>}
+      <input type="date" value={date} onChange={e => setDate(e.target.value)} style={S.input} />
+      <input type="time" value={time} onChange={e => setTime(e.target.value)} style={S.input} />
+      <label style={S.label}>投票締切日（任意）</label>
+      <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} style={S.input} />
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ date, time, deadline, month: date?.slice(5, 7) })} disabled={!date}>作成</button>
+      </div>
+    </div>
+  );
+}
+
+function ExpenseForm({ event, members, onSubmit, onCancel }) {
+  const [total, setTotal] = useState('');
+  const [perPerson, setPerPerson] = useState('');
+  const [paidBy, setPaidBy] = useState('');
+  const [note, setNote] = useState('');
+  
+  const yesCount = Object.values(event.attendance || {}).filter(v => v === 'yes').length;
+  
+  useEffect(() => {
+    if (total && yesCount > 0) {
+      setPerPerson(Math.ceil(+total / yesCount));
+    }
+  }, [total, yesCount]);
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>💸 会計記録</h3>
+      <div style={S.hint}>参加者: {yesCount}名</div>
+      <input type="number" value={total} onChange={e => setTotal(e.target.value)} style={S.input} placeholder="合計金額(円)" />
+      <div style={S.calcResult}>一人あたり: ¥{perPerson ? (+perPerson).toLocaleString() : '-'}</div>
+      <select value={paidBy} onChange={e => setPaidBy(e.target.value)} style={S.input}>
+        <option value="">誰が払った？</option>
+        {members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+      </select>
+      <input type="text" value={note} onChange={e => setNote(e.target.value)} style={S.input} placeholder="メモ" />
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ total: +total, perPerson: +perPerson, paidBy, note })} disabled={!total}>記録</button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsForm({ group, onSubmit, onChangePassword, onCancel }) {
+  const [name, setName] = useState(group.name);
+  const [monthlyAmount, setMonthlyAmount] = useState((group.monthlyAmount || 0) / 1000);
+  const [savingsAmount, setSavingsAmount] = useState((group.savingsAmount || 0) / 1000);
+  const [startMonth, setStartMonth] = useState(group.startMonth || '');
+  const [endMonth, setEndMonth] = useState(group.endMonth || '');
+  const [bankInfo, setBankInfo] = useState(group.bankInfo || '');
+  const [lineUrl, setLineUrl] = useState(group.lineGroupUrl || '');
+  const [scheduleType, setScheduleType] = useState(group.partySchedule?.type || 'none');
+  const [dayOfWeek, setDayOfWeek] = useState(group.partySchedule?.dayOfWeek || 6);
+  const [weekOfMonth, setWeekOfMonth] = useState(group.partySchedule?.weekOfMonth || 4);
+  const [newPw, setNewPw] = useState('');
+  const [showPwChange, setShowPwChange] = useState(false);
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>⚙️ 設定</h3>
+      <input type="text" value={name} onChange={e => setName(e.target.value)} style={S.input} placeholder="グループ名" />
+      
+      <label style={S.label}>💰 金額設定</label>
+      <div style={S.row2}>
+        <div>
+          <div style={{fontSize: 12, color: '#64748b', marginBottom: 4}}>本体（千円）</div>
+          <input type="number" value={monthlyAmount} onChange={e => setMonthlyAmount(+e.target.value)} style={S.input} placeholder="10" />
+        </div>
+        <div>
+          <div style={{fontSize: 12, color: '#64748b', marginBottom: 4}}>積立（千円）</div>
+          <input type="number" value={savingsAmount} onChange={e => setSavingsAmount(+e.target.value)} style={S.input} placeholder="2" />
+        </div>
+      </div>
+      
+      <label style={S.label}>📅 期間設定</label>
+      <div style={S.row2}>
+        <div>
+          <div style={{fontSize: 12, color: '#64748b', marginBottom: 4}}>開始月</div>
+          <input type="month" value={startMonth} onChange={e => setStartMonth(e.target.value)} style={S.input} />
+        </div>
+        <div>
+          <div style={{fontSize: 12, color: '#64748b', marginBottom: 4}}>終了月</div>
+          <input type="month" value={endMonth} onChange={e => setEndMonth(e.target.value)} style={S.input} />
+        </div>
+      </div>
+      
+      <label style={S.label}>🏦 口座情報</label>
+      <input type="text" value={bankInfo} onChange={e => setBankInfo(e.target.value)} style={S.input} placeholder="ゆうちょ銀行 0520405" />
+      
+      <label style={S.label}>💬 LINEグループURL</label>
+      <input type="text" value={lineUrl} onChange={e => setLineUrl(e.target.value)} style={S.input} placeholder="https://line.me/..." />
+      
+      <label style={S.label}>🍻 定期開催設定</label>
+      <select value={scheduleType} onChange={e => setScheduleType(e.target.value)} style={S.input}>
+        <option value="none">設定なし</option>
+        <option value="monthly">毎月</option>
+      </select>
+      {scheduleType === 'monthly' && (
+        <div style={S.row2}>
+          <select value={weekOfMonth} onChange={e => setWeekOfMonth(+e.target.value)} style={S.input}>
+            <option value={1}>第1</option>
+            <option value={2}>第2</option>
+            <option value={3}>第3</option>
+            <option value={4}>第4</option>
+            <option value={-1}>最終</option>
+          </select>
+          <select value={dayOfWeek} onChange={e => setDayOfWeek(+e.target.value)} style={S.input}>
+            <option value={0}>日曜</option>
+            <option value={1}>月曜</option>
+            <option value={2}>火曜</option>
+            <option value={3}>水曜</option>
+            <option value={4}>木曜</option>
+            <option value={5}>金曜</option>
+            <option value={6}>土曜</option>
+          </select>
+        </div>
+      )}
+
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ 
+          name, 
+          monthlyAmount: monthlyAmount * 1000, 
+          savingsAmount: savingsAmount * 1000, 
+          startMonth, 
+          endMonth, 
+          bankInfo, 
+          lineGroupUrl: lineUrl, 
+          partySchedule: { type: scheduleType, dayOfWeek, weekOfMonth } 
+        })}>保存</button>
+      </div>
+
+      <hr style={{margin: '20px 0', border: 'none', borderTop: '1px solid #e2e8f0'}} />
+
+      {showPwChange ? (
+        <>
+          <input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} style={S.input} placeholder="新しいパスワード" />
+          <div style={S.btnRow}>
+            <button style={S.cancelBtn} onClick={() => setShowPwChange(false)}>キャンセル</button>
+            <button style={S.submitBtn} onClick={() => { onChangePassword(newPw); setShowPwChange(false); }} disabled={!newPw}>変更</button>
+          </div>
+        </>
+      ) : (
+        <button style={S.linkBtn} onClick={() => setShowPwChange(true)}>🔐 パスワード変更</button>
+      )}
+    </div>
+  );
+}
+
+function ExportForm({ group, getMonthList, getMemberPaymentForMonth, getMemberBalance, onCancel }) {
+  const handleExport = () => {
+    const months = getMonthList();
+    let csv = '\uFEFF' + group.name + '\n';
+    csv += `No,名前,${months.map(m => m.slice(5) + '月').join(',')},残高\n`;
+    group.members.forEach((m, i) => {
+      const bal = getMemberBalance(m.id);
+      csv += `${i + 1},${m.name},${months.map(mo => { const info = getMemberPaymentForMonth(m.id, mo); return info.status === 'paid' ? '✓' : info.status === 'offset' ? '相殺' : ''; }).join(',')},${bal.balance / 1000}\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `模合_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  };
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📊 エクスポート</h3>
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>閉じる</button>
+        <button style={S.submitBtn} onClick={handleExport}>📥 ダウンロード</button>
+      </div>
+    </div>
+  );
+}
+
+// 積立金使用フォーム
+function SavingsUsageForm({ group, totalSavings, onSubmit, onCancel, onCancelUsage }) {
+  const [purpose, setPurpose] = useState('');
+  const [amount, setAmount] = useState('');
+  const usageHistory = (group.savingsUsage || []).filter(u => u.status !== 'deleted');
+  
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>💎 積立金管理</h3>
+      
+      <div style={{background: '#f0fdf4', padding: 14, borderRadius: 10, marginBottom: 16}}>
+        <div style={{fontSize: 12, color: '#166534'}}>現在の積立残高</div>
+        <div style={{fontSize: 24, fontWeight: 700, color: '#15803d'}}>¥{(totalSavings/1000).toFixed(0)}千</div>
+      </div>
+      
+      <label style={S.label}>使用目的</label>
+      <input type="text" value={purpose} onChange={e => setPurpose(e.target.value)} style={S.input} placeholder="例: 飲み会補助、景品代" />
+      
+      <label style={S.label}>金額（円）</label>
+      <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={S.input} placeholder="例: 10000" />
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>閉じる</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ purpose, amount: +amount })} disabled={!purpose || !amount || +amount > totalSavings}>使用記録</button>
+      </div>
+      
+      {usageHistory.length > 0 && (
+        <div style={{marginTop: 20}}>
+          <h4 style={{fontSize: 14, fontWeight: 600, marginBottom: 10}}>📋 使用履歴</h4>
+          {usageHistory.map(u => (
+            <div key={u.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f1f5f9'}}>
+              <div>
+                <div style={{fontWeight: 600}}>{u.purpose}</div>
+                <div style={{fontSize: 12, color: '#64748b'}}>{u.recordedAt?.slice(0, 10)}</div>
+              </div>
+              <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                <span style={{color: '#dc2626'}}>¥{(u.amount/1000).toFixed(0)}千</span>
+                <button style={S.cancelSmBtn} onClick={() => onCancelUsage(u.id)}>取消</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 入金リマインドLINEメッセージ
+function PaymentReminderModal({ group, month, status, onClose, notify }) {
+  const monthDisplay = month.replace('-', '年') + '月';
+  const unpaidNames = status.unpaid.map(m => m.name).join('、');
+  const amount = (group.monthlyAmount + group.savingsAmount).toLocaleString();
+  
+  const message = `🌺 ${group.name} 入金のお願い 🌺
+
+━━━━━━━━━━━━━━━━
+📅 ${monthDisplay}分
+💰 金額: ¥${amount}
+🏦 振込先: ${group.bankInfo || '（要確認）'}
+━━━━━━━━━━━━━━━━
+
+${status.unpaid.length > 0 ? `⏳ 未入金の方（${status.unpaid.length}名）:
+${unpaidNames}
+
+お忙しいところ恐れ入りますが、
+ご確認をお願いいたします🙏` : '✅ 全員入金済みです！ありがとうございます🎉'}`;
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(message);
+    notify('コピーしました！');
+  };
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📱 入金リマインド</h3>
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 300, overflow: 'auto'}}>
+        {message}
+      </div>
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
+        <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+      </div>
+      {group.lineGroupUrl && (
+        <a href={group.lineGroupUrl} target="_blank" rel="noreferrer" style={{...S.lineLink, marginTop: 10}}>💬 LINEを開く</a>
+      )}
+    </div>
+  );
+}
+
+// 滞納者催促メッセージ
+function DelinquentReminderModal({ group, delinquents, onClose, notify }) {
+  const [selectedMember, setSelectedMember] = useState(delinquents[0]?.id || '');
+  const member = delinquents.find(d => d.id === selectedMember);
+  
+  const message = member ? `${member.name}さん
+
+お疲れ様です。
+${group.name}の模合について確認させてください。
+
+現在 ${member.unpaidMonths}ヶ月分（¥${(member.unpaidAmount/1000).toFixed(0)}千）が未入金となっております。
+
+お忙しいところ恐縮ですが、
+ご確認いただけますでしょうか。
+
+何かご事情がありましたら、
+お気軽にご連絡ください🙏
+
+━━━━━━━━━━━━━━━━
+🏦 振込先: ${group.bankInfo || '（要確認）'}
+━━━━━━━━━━━━━━━━` : '';
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(message);
+    notify('コピーしました！');
+  };
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📱 催促メッセージ</h3>
+      
+      <label style={S.label}>送信先</label>
+      <select value={selectedMember} onChange={e => setSelectedMember(e.target.value)} style={S.input}>
+        {delinquents.map(d => (
+          <option key={d.id} value={d.id}>{d.name}（{d.unpaidMonths}ヶ月滞納）</option>
+        ))}
+      </select>
+      
+      <div style={{background: '#fef2f2', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto', marginTop: 10}}>
+        {message}
+      </div>
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
+        <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+      </div>
+    </div>
+  );
+}
+
+// 受取順一覧モーダル
+function ReceiveOrderModal({ group, receiveOrder, onClose }) {
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📋 受取順一覧</h3>
+      <div style={{fontSize: 13, color: '#64748b', marginBottom: 12}}>
+        メンバー順で受取した場合の順番です
+      </div>
+      
+      <div style={{maxHeight: 400, overflow: 'auto'}}>
+        {receiveOrder.map((item, i) => (
+          <div key={i} style={{
+            display: 'flex', 
+            alignItems: 'center', 
+            padding: '12px', 
+            marginBottom: 8, 
+            borderRadius: 10,
+            background: item.status === 'done' ? '#d1fae5' : '#f8fafc',
+            border: item.status === 'done' ? '2px solid #10b981' : '2px solid #e2e8f0'
+          }}>
+            <div style={{
+              width: 32, 
+              height: 32, 
+              borderRadius: '50%', 
+              background: item.status === 'done' ? '#10b981' : '#0ea5e9', 
+              color: '#fff', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              fontWeight: 700,
+              marginRight: 12
+            }}>
+              {item.order}
+            </div>
+            <div style={{flex: 1}}>
+              <div style={{fontWeight: 600}}>{item.member?.name}</div>
+              {item.status === 'done' && (
+                <div style={{fontSize: 12, color: '#059669'}}>{item.month} ¥{(item.amount/1000).toFixed(0)}千</div>
+              )}
+            </div>
+            <div style={{
+              padding: '4px 10px', 
+              borderRadius: 6, 
+              fontSize: 12, 
+              fontWeight: 600,
+              background: item.status === 'done' ? '#059669' : '#e2e8f0',
+              color: item.status === 'done' ? '#fff' : '#64748b'
+            }}>
+              {item.status === 'done' ? '✓ 受取済' : '待ち'}
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      <button style={{...S.cancelBtn, width: '100%', marginTop: 12}} onClick={onClose}>閉じる</button>
+    </div>
+  );
+}
+
+function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, isAdmin }) {
+  const [selected, setSelected] = useState([]);
+  const status = getMonthlyStatus(month);
+  const toggle = (id) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+
+  const changeMonth = (delta) => {
+    const d = new Date(month + '-01');
+    d.setMonth(d.getMonth() + delta);
+    setMonth(d.toISOString().slice(0, 7));
+    setSelected([]);
+  };
+
+  return (
+    <div style={S.view}>
+      <h3 style={S.viewTitle}>✅ 一括入金</h3>
+      <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+        <button style={{...S.monthNavBtn, borderRadius: '10px 0 0 10px'}} onClick={() => changeMonth(-1)}>◀</button>
+        <input type="month" value={month} onChange={e => { setMonth(e.target.value); setSelected([]); }} style={{...S.input, flex: 1, borderRadius: 0, textAlign: 'center'}} />
+        <button style={{...S.monthNavBtn, borderRadius: '0 10px 10px 0'}} onClick={() => changeMonth(1)}>▶</button>
+      </div>
+      <div style={S.bulkInfo}><span>選択: {selected.length}名</span><span>¥{((group.monthlyAmount + group.savingsAmount) * selected.length).toLocaleString()}</span></div>
+      <div style={S.bulkBtns}>
+        <button style={S.selectBtn} onClick={() => setSelected(status.unpaid.map(m => m.id))}>全選択</button>
+        <button style={S.selectBtn} onClick={() => setSelected([])}>解除</button>
+      </div>
+      <div style={S.bulkList}>
+        {group.members.map(m => {
+          const isPaid = status.paid.some(p => p.id === m.id);
+          const isSel = selected.includes(m.id);
+          return (
+            <div key={m.id} style={{...S.bulkItem, background: isPaid ? '#d1fae5' : isSel ? '#dbeafe' : '#fff', opacity: isPaid ? 0.6 : 1}} onClick={() => !isPaid && toggle(m.id)}>
+              <span>{isPaid ? '✅' : isSel ? '☑️' : '⬜'}</span>
+              <span>{m.name}</span>
+            </div>
+          );
+        })}
+      </div>
+      {isAdmin && selected.length > 0 && <button style={S.fixedBtn} onClick={() => onSubmit(selected, month)}>{selected.length}名の入金を記録</button>}
+    </div>
+  );
+}
+
+function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
+  const [selectedMemberId, setSelectedMemberId] = useState(group.members[0]?.id || '');
+  const [showAddVenue, setShowAddVenue] = useState(false);
+  const [showPastVenues, setShowPastVenues] = useState(false);
+  const [newVenue, setNewVenue] = useState({ name: '', address: '', url: '', budget: '' });
+  const [photoUrl, setPhotoUrl] = useState('');
+
+  if (!currentEvent) {
+    return (
+      <div style={S.view}>
+        <div style={S.viewHeader}>
+          <h3 style={S.viewTitle}>🍻 飲み会</h3>
+          {isAdmin && <button style={S.addBtn} onClick={onCreateEvent}>+</button>}
+        </div>
+        <div style={S.emptyParty}>
+          <div style={{fontSize: 56}}>🍺</div>
+          <p style={{fontSize: 16}}>予定なし</p>
+          {getNextPartyDate() && <p style={{...S.hint, fontSize: 14}}>💡 次回提案: {getNextPartyDate()}</p>}
+          {isAdmin && <button style={S.createBtn} onClick={onCreateEvent}>飲み会を作成</button>}
+        </div>
+        {pastEvents.length > 0 && (
+          <div style={S.card}>
+            <h4 style={S.subTitle}>📸 過去の飲み会</h4>
+            {pastEvents.map(e => {
+              const venue = e.venues.find(v => v.id === e.confirmedVenue);
+              const yesCount = Object.values(e.attendance || {}).filter(v => v === 'yes').length;
+              return (
+                <div key={e.id} style={S.pastRow}>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <span>{e.date}</span>
+                    {e.autoArchived && <span style={{fontSize: 11, background: '#e2e8f0', padding: '3px 6px', borderRadius: 4}}>自動</span>}
+                  </div>
+                  <span>{venue?.name || '-'}</span>
+                  <span style={{fontSize: 13, color: '#64748b'}}>{yesCount}名</span>
+                  {e.expense && <span>¥{e.expense.perPerson?.toLocaleString()}/人</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const att = currentEvent.attendance || {};
+  const counts = {
+    yes: Object.values(att).filter(v => v === 'yes').length,
+    no: Object.values(att).filter(v => v === 'no').length,
+    maybe: Object.values(att).filter(v => v === 'maybe').length,
+  };
+  const venueCounts = {};
+  Object.values(currentEvent.venueVotes || {}).forEach(vid => { venueCounts[vid] = (venueCounts[vid] || 0) + 1; });
+  const confirmedVenue = currentEvent.venues.find(v => v.id === currentEvent.confirmedVenue);
+  const isDeadlinePassed = currentEvent.deadline && new Date(currentEvent.deadline) < new Date();
+
+  return (
+    <div style={S.view}>
+      <div style={S.viewHeader}>
+        <h3 style={S.viewTitle}>🍻 {currentEvent.date}</h3>
+        {currentEvent.status === 'confirmed' && <span style={S.confirmedTag}>✓確定</span>}
+      </div>
+
+      {/* 基本情報 */}
+      <div style={S.partyInfo}>
+        <div style={{fontSize: 16}}>📅 {currentEvent.date} {currentEvent.time}</div>
+        {currentEvent.deadline && <div style={{fontSize: 13, color: isDeadlinePassed ? '#dc2626' : '#64748b', marginTop: 4}}>⏰ 締切: {currentEvent.deadline} {isDeadlinePassed && '(締切済)'}</div>}
+        {confirmedVenue && (
+          <div style={S.confirmedBox}>
+            <div style={{fontWeight: 700, fontSize: 16}}>📍 {confirmedVenue.name}</div>
+            {confirmedVenue.address && <div style={{fontSize: 14, marginTop: 4}}>{confirmedVenue.address}</div>}
+            {confirmedVenue.url && <a href={confirmedVenue.url} target="_blank" rel="noreferrer" style={S.link}>🔗 詳細</a>}
+          </div>
+        )}
+      </div>
+
+      {/* 参加可否 */}
+      <div style={S.card}>
+        <h4 style={S.subTitle}>🗳️ 参加可否</h4>
+        <div style={S.voteBar}>
+          <div style={{...S.voteSection, background: '#10b981', width: `${(counts.yes / group.members.length) * 100}%`}}></div>
+          <div style={{...S.voteSection, background: '#f59e0b', width: `${(counts.maybe / group.members.length) * 100}%`}}></div>
+          <div style={{...S.voteSection, background: '#ef4444', width: `${(counts.no / group.members.length) * 100}%`}}></div>
+        </div>
+        <div style={S.voteCounts}>
+          <span style={{color: '#10b981'}}>⭕{counts.yes}</span>
+          <span style={{color: '#f59e0b'}}>🔺{counts.maybe}</span>
+          <span style={{color: '#ef4444'}}>❌{counts.no}</span>
+        </div>
+        <div style={S.myVote}>
+          <select value={selectedMemberId} onChange={e => setSelectedMemberId(e.target.value)} style={S.input}>
+            {group.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <div style={S.voteBtns}>
+            {['yes', 'maybe', 'no'].map(v => (
+              <button key={v} style={{...S.voteBtn, background: att[selectedMemberId] === v ? (v === 'yes' ? '#10b981' : v === 'maybe' ? '#f59e0b' : '#ef4444') : '#f1f5f9', color: att[selectedMemberId] === v ? '#fff' : '#64748b'}} onClick={() => onAttendanceVote(currentEvent.id, selectedMemberId, v)}>
+                {v === 'yes' ? '⭕' : v === 'maybe' ? '🔺' : '❌'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={S.attList}>
+          {group.members.map(m => (
+            <div key={m.id} style={S.attItem}>
+              <span>{m.name}</span>
+              <span style={{color: att[m.id] === 'yes' ? '#10b981' : att[m.id] === 'maybe' ? '#f59e0b' : att[m.id] === 'no' ? '#ef4444' : '#94a3b8'}}>
+                {att[m.id] === 'yes' ? '⭕' : att[m.id] === 'maybe' ? '🔺' : att[m.id] === 'no' ? '❌' : '−'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 店舗候補 */}
+      {currentEvent.status === 'voting' && (
+        <div style={S.card}>
+          <h4 style={S.subTitle}>📍 店舗候補</h4>
+          {currentEvent.venues.length === 0 && <div style={S.empty}>候補なし</div>}
+          {currentEvent.venues.map(v => {
+            const cnt = venueCounts[v.id] || 0;
+            const myVote = currentEvent.venueVotes?.[selectedMemberId] === v.id;
+            return (
+              <div key={v.id} style={{...S.venueCard, borderColor: myVote ? '#0ea5e9' : '#e2e8f0'}}>
+                <div style={S.venueTop}>
+                  <div>
+                    <div style={{fontWeight: 600, fontSize: 15}}>{v.name}</div>
+                    {v.budget && <div style={{fontSize: 13, color: '#f59e0b'}}>💰{v.budget}</div>}
+                  </div>
+                  <div style={S.voteCount}>{cnt}<span style={{fontSize: 12}}>票</span></div>
+                </div>
+                <div style={S.venueActions}>
+                  <button style={{...S.venueVoteBtn, background: myVote ? '#0ea5e9' : '#f1f5f9', color: myVote ? '#fff' : '#64748b'}} onClick={() => onVenueVote(currentEvent.id, selectedMemberId, v.id)}>{myVote ? '✓投票済' : '投票'}</button>
+                  {v.url && <a href={v.url} target="_blank" rel="noreferrer" style={S.venueUrlBtn}>🔗</a>}
+                  {isAdmin && <button style={S.venueDelBtn} onClick={() => onDeleteVenue(currentEvent.id, v.id)}>🗑</button>}
+                </div>
+              </div>
+            );
+          })}
+
+          {isAdmin && (
+            <>
+              {showPastVenues ? (
+                <div style={S.pastVenuesBox}>
+                  <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 過去の店舗</div>
+                  {(group.pastVenues || []).length === 0 ? <div style={S.empty}>履歴なし</div> : (group.pastVenues || []).map(v => (
+                    <div key={v.id} style={S.pastVenueItem} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
+                      <span style={{fontSize: 14}}>{v.name}</span>
+                      <span style={{fontSize: 12, color: '#64748b'}}>{v.usedCount}回利用</span>
+                    </div>
+                  ))}
+                  <button style={S.linkBtn} onClick={() => setShowPastVenues(false)}>閉じる</button>
+                </div>
+              ) : showAddVenue ? (
+                <div style={S.addVenueForm}>
+                  <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
+                  <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
+                  <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL" />
+                  <input type="text" value={newVenue.budget} onChange={e => setNewVenue({...newVenue, budget: e.target.value})} style={S.input} placeholder="予算" />
+                  <div style={S.btnRow}>
+                    <button style={S.cancelBtn} onClick={() => setShowAddVenue(false)}>キャンセル</button>
+                    <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '', budget: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={S.addVenueBtns}>
+                  <button style={S.addVenueBtn} onClick={() => setShowAddVenue(true)}>+ 新規追加</button>
+                  <button style={S.pastVenueBtn} onClick={() => setShowPastVenues(true)}>🏮 過去から選ぶ</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 確定ボタン */}
+      {isAdmin && currentEvent.status === 'voting' && currentEvent.venues.length > 0 && (
+        <div style={S.card}>
+          <h4 style={S.subTitle}>📢 予約確定</h4>
+          {currentEvent.venues.map(v => (
+            <button key={v.id} style={S.confirmBtn} onClick={() => onConfirmEvent(currentEvent.id, v.id)}>{v.name} で確定</button>
+          ))}
+        </div>
+      )}
+
+      {/* 確定後 */}
+      {currentEvent.status === 'confirmed' && (
+        <>
+          <div style={S.card}>
+            <h4 style={S.subTitle}>📢 LINE通知</h4>
+            <button style={S.lineBtn} onClick={() => {
+              const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+              const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+              const msg = `🌺 模合飲み会のお知らせ 🌺
+
+━━━━━━━━━━━━━━━━
+📅 日時: ${currentEvent.date} (${['日','月','火','水','木','金','土'][new Date(currentEvent.date).getDay()]}曜日) ${currentEvent.time}〜
+
+📍 店舗: ${confirmedVenue?.name || '未定'}
+${confirmedVenue?.address ? `📮 住所: ${confirmedVenue.address}` : ''}
+${confirmedVenue?.budget ? `💰 予算: ${confirmedVenue.budget}` : ''}
+${confirmedVenue?.url ? `🔗 詳細: ${confirmedVenue.url}` : ''}
+━━━━━━━━━━━━━━━━
+
+✅ 参加 (${yes.length}名):
+${yes.join('、') || 'なし'}
+
+${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n` : ''}
+よろしくお願いします！🍻`;
+              navigator.clipboard?.writeText(msg);
+              notify('コピーしました！');
+            }}>📋 LINEメッセージをコピー</button>
+            {group.lineGroupUrl && <a href={group.lineGroupUrl} target="_blank" rel="noreferrer" style={S.lineLink}>💬 LINEを開く</a>}
+          </div>
+
+          {/* 会計 */}
+          <div style={S.card}>
+            <h4 style={S.subTitle}>💸 会計</h4>
+            {currentEvent.expense ? (
+              <div style={{fontSize: 15}}>
+                <div style={{marginBottom: 6}}>合計: ¥{currentEvent.expense.total?.toLocaleString()}</div>
+                <div style={{fontWeight: 600}}>一人: ¥{currentEvent.expense.perPerson?.toLocaleString()}</div>
+              </div>
+            ) : (
+              isAdmin && <button style={S.linkBtn} onClick={() => onRecordExpense(currentEvent.id)}>+ 会計を記録</button>
+            )}
+          </div>
+
+          {/* 写真 */}
+          <div style={S.card}>
+            <h4 style={S.subTitle}>📸 写真アルバム</h4>
+            <div style={S.photoGrid}>
+              {(currentEvent.photos || []).map(p => (
+                <a key={p.id} href={p.url} target="_blank" rel="noreferrer" style={S.photoLink}>🖼</a>
+              ))}
+            </div>
+            {isAdmin && (
+              <div style={S.addPhotoRow}>
+                <input type="text" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{...S.input, flex: 1}} placeholder="写真URL" />
+                <button style={S.addPhotoBtn} onClick={() => { onAddPhoto(currentEvent.id, photoUrl); setPhotoUrl(''); }} disabled={!photoUrl}>追加</button>
+              </div>
+            )}
+          </div>
+
+          {/* 完了ボタン */}
+          {isAdmin && (
+            <button style={S.completeBtn} onClick={() => onCompleteEvent(currentEvent.id)}>✓ 飲み会を完了にする</button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===== スタイル（スマホ最適化版） =====
+const S = {
+  container: { minHeight: '100vh', background: '#f1f5f9', fontFamily: 'system-ui, sans-serif', WebkitTextSizeAdjust: '100%' },
+  loading: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', fontSize: 18 },
+  header: { background: 'linear-gradient(135deg, #0ea5e9, #0284c7)', padding: '14px 16px', position: 'sticky', top: 0, zIndex: 100 },
+  headerInner: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: 600, margin: '0 auto' },
+  logo: { display: 'flex', alignItems: 'center', gap: 8, color: '#fff', fontSize: 22 },
+  logoText: { fontWeight: 700 },
+  adminBadge: { background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: 20, fontSize: 13, cursor: 'pointer', minHeight: 40 },
+  loginBadge: { background: '#fff', color: '#0ea5e9', border: 'none', padding: '8px 14px', borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 40 },
+  toast: { position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', padding: '12px 24px', borderRadius: 10, color: '#fff', fontSize: 15, zIndex: 200, fontWeight: 500 },
+  main: { maxWidth: 600, margin: '0 auto', padding: 14, paddingBottom: 90 },
+  infoBadge: { textAlign: 'center', padding: 12, background: '#e0f2fe', borderRadius: 10, fontSize: 15, color: '#0369a1', marginBottom: 14, fontWeight: 600 },
+  nav: { display: 'flex', gap: 4, marginBottom: 18, background: '#fff', padding: 6, borderRadius: 14 },
+  navBtn: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '10px 4px', border: 'none', borderRadius: 12, background: 'transparent', cursor: 'pointer', fontSize: 18, minHeight: 56 },
+  navActive: { background: '#0ea5e9', color: '#fff' },
+  navLabel: { fontSize: 11, fontWeight: 600 },
+  view: { display: 'flex', flexDirection: 'column', gap: 14 },
+  viewHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  viewTitle: { fontSize: 18, fontWeight: 700 },
+  stats: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 },
+  stat: { background: '#fff', padding: '14px 6px', borderRadius: 12, textAlign: 'center' },
+  statLabel: { fontSize: 11, color: '#64748b', marginBottom: 4 },
+  statVal: { fontSize: 20, fontWeight: 700 },
+  partyBanner: { background: 'linear-gradient(135deg, #f59e0b, #d97706)', padding: 14, borderRadius: 14, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 15 },
+  partyBannerBtn: { background: 'rgba(255,255,255,0.2)', border: 'none', color: '#fff', padding: '10px 16px', borderRadius: 10, fontSize: 14, cursor: 'pointer', fontWeight: 600, minHeight: 44 },
+  card: { background: '#fff', padding: 18, borderRadius: 14 },
+  cardTitle: { fontSize: 16, fontWeight: 700, marginBottom: 14 },
+  monthNavBtn: { padding: '14px 16px', background: '#0ea5e9', color: '#fff', border: 'none', fontSize: 16, cursor: 'pointer', minHeight: 48, fontWeight: 600 },
+  subTitle: { fontSize: 15, fontWeight: 600, marginBottom: 10, color: '#334155' },
+  row: { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9', fontSize: 15 },
+  unpaidBox: { marginTop: 10, padding: 12, background: '#fef2f2', borderRadius: 8, fontSize: 14, color: '#dc2626', lineHeight: 1.5 },
+  quickBtns: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 },
+  qBtn: { padding: '14px 8px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  lotteryBtn: { width: '100%', padding: 16, background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  addBtn: { width: 44, height: 44, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '50%', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  cancelSmBtn: { padding: '6px 10px', background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, minHeight: 32 },
+  exportBtn: { padding: '10px 16px', background: '#10b981', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: 'pointer', minHeight: 44 },
+  memberCard: { background: '#fff', borderRadius: 14, padding: 16 },
+  memberTop: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 },
+  memberNum: { width: 36, height: 36, background: '#0ea5e9', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700 },
+  memberInfo: { flex: 1 },
+  memberName: { fontSize: 16, fontWeight: 600 },
+  memberMemo: { fontSize: 13, color: '#f59e0b', marginTop: 4 },
+  memberBtns: { display: 'flex', gap: 8 },
+  editBtn: { width: 40, height: 40, background: '#e0f2fe', color: '#0284c7', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 16 },
+  delBtn: { width: 40, height: 40, background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '50%', cursor: 'pointer', fontSize: 18 },
+  memberStats: { display: 'flex', justifyContent: 'space-around', paddingTop: 12, borderTop: '1px solid #f1f5f9', fontSize: 14 },
+  mLabel: { color: '#64748b', marginRight: 6 },
+  notRecItem: { display: 'flex', justifyContent: 'space-between', padding: '12px 14px', background: '#f8fafc', borderRadius: 8, marginBottom: 8, fontSize: 14 },
+  histRow: { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 },
+  empty: { textAlign: 'center', padding: 30, color: '#94a3b8', fontSize: 15 },
+  tableWrap: { overflowX: 'auto', background: '#fff', borderRadius: 12, WebkitOverflowScrolling: 'touch' },
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
+  th: { padding: '12px 6px', background: '#f1f5f9', borderBottom: '2px solid #e2e8f0', fontWeight: 600, textAlign: 'center', whiteSpace: 'nowrap' },
+  td: { padding: '10px 6px', borderBottom: '1px solid #f1f5f9', textAlign: 'center', whiteSpace: 'nowrap' },
+  bulkInfo: { display: 'flex', justifyContent: 'space-between', padding: 14, background: '#fff', borderRadius: 10, fontWeight: 600, fontSize: 15 },
+  bulkBtns: { display: 'flex', gap: 10 },
+  selectBtn: { flex: 1, padding: 12, background: '#e2e8f0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, minHeight: 44 },
+  bulkList: { display: 'flex', flexDirection: 'column', gap: 8 },
+  bulkItem: { display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 10, cursor: 'pointer', minHeight: 52 },
+  fixedBtn: { position: 'fixed', bottom: 24, left: 16, right: 16, maxWidth: 568, margin: '0 auto', padding: 16, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 14, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  emptyParty: { textAlign: 'center', padding: 50 },
+  createBtn: { padding: '14px 28px', background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  pastRow: { display: 'flex', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid #f1f5f9', fontSize: 14 },
+  partyInfo: { background: '#fff', padding: 18, borderRadius: 14, borderLeft: '4px solid #f59e0b' },
+  confirmedBox: { marginTop: 14, padding: 14, background: '#fefce8', borderRadius: 10 },
+  link: { color: '#0ea5e9', fontSize: 14, textDecoration: 'none' },
+  confirmedTag: { background: '#d1fae5', color: '#059669', padding: '6px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600 },
+  voteBar: { display: 'flex', height: 12, borderRadius: 6, overflow: 'hidden', background: '#e2e8f0', marginBottom: 10 },
+  voteSection: { height: '100%' },
+  voteCounts: { display: 'flex', justifyContent: 'center', gap: 20, fontSize: 15, marginBottom: 14 },
+  myVote: { padding: 14, background: '#f8fafc', borderRadius: 10, marginBottom: 14 },
+  voteBtns: { display: 'flex', gap: 10, marginTop: 10 },
+  voteBtn: { flex: 1, padding: 14, border: 'none', borderRadius: 10, fontSize: 18, cursor: 'pointer', minHeight: 52 },
+  attList: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 },
+  attItem: { display: 'flex', justifyContent: 'space-between', padding: '10px 12px', background: '#f8fafc', borderRadius: 8, fontSize: 14 },
+  venueCard: { padding: 16, border: '2px solid #e2e8f0', borderRadius: 12, marginBottom: 10 },
+  venueTop: { display: 'flex', justifyContent: 'space-between', marginBottom: 10 },
+  voteCount: { fontSize: 28, fontWeight: 700, color: '#0ea5e9' },
+  venueActions: { display: 'flex', gap: 10 },
+  venueVoteBtn: { flex: 1, padding: 12, border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 44 },
+  venueUrlBtn: { padding: '10px 14px', background: '#f1f5f9', border: 'none', borderRadius: 8, textDecoration: 'none', fontSize: 14, minHeight: 44, display: 'flex', alignItems: 'center' },
+  venueDelBtn: { padding: '10px 14px', background: '#fee2e2', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, minHeight: 44 },
+  addVenueBtns: { display: 'flex', gap: 10 },
+  addVenueBtn: { flex: 1, padding: 14, background: '#f1f5f9', border: '2px dashed #cbd5e1', borderRadius: 10, color: '#64748b', cursor: 'pointer', fontSize: 14, minHeight: 48 },
+  pastVenueBtn: { flex: 1, padding: 14, background: '#fef3c7', border: 'none', borderRadius: 10, color: '#92400e', cursor: 'pointer', fontSize: 14, minHeight: 48 },
+  addVenueForm: { display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 },
+  pastVenuesBox: { marginTop: 14, padding: 14, background: '#fffbeb', borderRadius: 10 },
+  pastVenueItem: { display: 'flex', justifyContent: 'space-between', padding: '12px 14px', background: '#fff', borderRadius: 8, marginBottom: 8, cursor: 'pointer', minHeight: 48, alignItems: 'center' },
+  confirmBtn: { width: '100%', padding: 14, background: '#10b981', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', marginBottom: 10, minHeight: 48 },
+  lineBtn: { width: '100%', padding: 14, background: '#06c755', color: '#fff', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 600, cursor: 'pointer', marginBottom: 10, minHeight: 52 },
+  lineLink: { display: 'block', textAlign: 'center', padding: 14, background: '#f1f5f9', borderRadius: 10, color: '#06c755', fontWeight: 600, textDecoration: 'none', fontSize: 15, minHeight: 48 },
+  photoGrid: { display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 },
+  photoLink: { width: 56, height: 56, background: '#f1f5f9', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', fontSize: 24 },
+  addPhotoRow: { display: 'flex', gap: 10 },
+  addPhotoBtn: { padding: '12px 18px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, minHeight: 44 },
+  completeBtn: { width: '100%', padding: 14, background: '#64748b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: 'pointer', minHeight: 48 },
+  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, zIndex: 300 },
+  modal: { background: '#fff', borderRadius: 20, padding: 24, width: '100%', maxWidth: 400, maxHeight: '85vh', overflow: 'auto', WebkitOverflowScrolling: 'touch' },
+  form: { display: 'flex', flexDirection: 'column', gap: 14 },
+  formTitle: { fontSize: 20, fontWeight: 700, marginBottom: 8 },
+  label: { fontSize: 14, fontWeight: 600, color: '#475569', marginTop: 8 },
+  input: { padding: 14, fontSize: 16, border: '2px solid #e2e8f0', borderRadius: 10, width: '100%', boxSizing: 'border-box', minHeight: 48 },
+  hint: { fontSize: 13, color: '#64748b', marginTop: 4 },
+  row2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 },
+  total: { padding: 16, background: '#f0f9ff', borderRadius: 10, textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#0284c7' },
+  calcResult: { padding: 16, background: '#f0f9ff', borderRadius: 10, textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#0284c7' },
+  btnRow: { display: 'flex', gap: 12, marginTop: 8 },
+  cancelBtn: { flex: 1, padding: 14, background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  submitBtn: { flex: 1, padding: 14, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 10, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
+  linkBtn: { padding: 12, background: 'transparent', color: '#0ea5e9', border: 'none', fontSize: 15, cursor: 'pointer', textDecoration: 'underline' },
+  settingsFab: { position: 'fixed', bottom: 24, right: 20, width: 56, height: 56, background: '#fff', border: '2px solid #e2e8f0', borderRadius: '50%', fontSize: 24, cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+};
