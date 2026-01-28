@@ -1,45 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-// Supabase設定（環境変数またはここに直接記入）
-const SUPABASE_URL = typeof window !== 'undefined' && window.SUPABASE_URL || 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = typeof window !== 'undefined' && window.SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY';
-
-// シンプルなSupabaseクライアント
-const supabase = {
-  async fetch(table, method = 'GET', body = null, id = null) {
-    const url = id 
-      ? `${SUPABASE_URL}/rest/v1/${table}?id=eq.${id}`
-      : `${SUPABASE_URL}/rest/v1/${table}`;
-    
-    const headers = {
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : undefined
-    };
-    
-    const options = { method, headers: Object.fromEntries(Object.entries(headers).filter(([_, v]) => v)) };
-    if (body) options.body = JSON.stringify(body);
-    
-    const res = await fetch(url, options);
-    if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
-    return method === 'DELETE' ? null : res.json();
-  },
-  
-  async getGroup() {
-    const data = await this.fetch('moai_groups', 'GET');
-    return data?.[0] || null;
-  },
-  
-  async saveGroup(groupData, existingId = null) {
-    if (existingId) {
-      await this.fetch('moai_groups', 'PATCH', { data: groupData }, existingId);
-    } else {
-      await this.fetch('moai_groups', 'POST', { data: groupData });
-    }
-  }
-};
-
 export default function MoaiManager() {
   const [currentView, setCurrentView] = useState('dashboard');
   const [isAdmin, setIsAdmin] = useState(false);
@@ -51,10 +11,6 @@ export default function MoaiManager() {
   const [editingEvent, setEditingEvent] = useState(null);
   const [notification, setNotification] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [dbRecordId, setDbRecordId] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState(null);
 
   // プリセットデータ
   const createPresetData = () => ({
@@ -99,86 +55,40 @@ export default function MoaiManager() {
 
   useEffect(() => {
     const loadData = async () => {
-      setIsLoading(true);
       try {
-        // Supabaseからデータ取得
-        const record = await supabase.getGroup();
-        
-        if (record?.data) {
-          setDbRecordId(record.id);
-          const groupData = record.data;
-          
+        const saved = await window.storage.get('moai-groups-v7');
+        if (saved?.value) {
+          const data = JSON.parse(saved.value);
           // 自動アーカイブ処理
           const today = new Date().toISOString().slice(0, 10);
-          const updatedEvents = (groupData.events || []).map(event => {
-            if (event.status !== 'completed' && event.date && event.date < today) {
-              return { ...event, status: 'completed', autoArchived: true };
-            }
-            return event;
+          const updatedGroups = data.groups.map(group => {
+            const updatedEvents = (group.events || []).map(event => {
+              // 開催日を過ぎた飲み会を自動で完了にする
+              if (event.status !== 'completed' && event.date && event.date < today) {
+                return { ...event, status: 'completed', autoArchived: true };
+              }
+              return event;
+            });
+            return { ...group, events: updatedEvents };
           });
-          const updatedGroup = { ...groupData, events: updatedEvents };
-          
-          setGroups([updatedGroup]);
-          setSelectedGroup(updatedGroup);
+          setGroups(updatedGroups || []);
+          if (updatedGroups?.length > 0) setSelectedGroup(updatedGroups[0]);
         } else {
-          // 初回: プリセットデータを作成
           const preset = createPresetData();
           setGroups([preset]);
           setSelectedGroup(preset);
-          // Supabaseに保存
-          await supabase.saveGroup(preset);
-          const newRecord = await supabase.getGroup();
-          if (newRecord) setDbRecordId(newRecord.id);
         }
       } catch (e) {
-        console.error('データ取得エラー:', e);
-        // オフライン時はローカルストレージから
-        try {
-          const local = localStorage.getItem('moai-backup');
-          if (local) {
-            const data = JSON.parse(local);
-            setGroups([data]);
-            setSelectedGroup(data);
-          } else {
-            const preset = createPresetData();
-            setGroups([preset]);
-            setSelectedGroup(preset);
-          }
-        } catch {
-          const preset = createPresetData();
-          setGroups([preset]);
-          setSelectedGroup(preset);
-        }
-        notify('オフラインモードで起動', 'error');
+        const preset = createPresetData();
+        setGroups([preset]);
+        setSelectedGroup(preset);
       }
-      setIsLoading(false);
     };
     loadData();
   }, []);
 
-  // データ変更時に自動保存
   useEffect(() => {
-    if (groups.length === 0 || isLoading) return;
-    
-    const saveData = async () => {
-      setIsSaving(true);
-      try {
-        await supabase.saveGroup(groups[0], dbRecordId);
-        // ローカルバックアップも保存
-        localStorage.setItem('moai-backup', JSON.stringify(groups[0]));
-        setLastSaved(new Date());
-      } catch (e) {
-        console.error('保存エラー:', e);
-        // ローカルには保存
-        localStorage.setItem('moai-backup', JSON.stringify(groups[0]));
-        notify('クラウド保存失敗（ローカル保存済）', 'error');
-      }
-      setIsSaving(false);
-    };
-    
-    // デバウンス: 1秒後に保存
-    const timer = setTimeout(saveData, 1000);
-    return () => clearTimeout(timer);
+    if (groups.length > 0) window.storage.set('moai-groups-v7', JSON.stringify({ groups }));
   }, [groups]);
 
   const notify = (msg, type = 'success') => {
@@ -714,28 +624,13 @@ export default function MoaiManager() {
   const getCurrentEvent = () => (selectedGroup?.events || []).find(e => e.status === 'voting' || e.status === 'confirmed');
   const getPastEvents = () => (selectedGroup?.events || []).filter(e => e.status === 'completed').slice(-10);
 
-  if (isLoading || !selectedGroup) {
-    return (
-      <div style={S.loading}>
-        <div style={{textAlign: 'center'}}>
-          <div style={{fontSize: 48, marginBottom: 16}}>🌺</div>
-          <div style={{fontSize: 18, fontWeight: 600, color: '#0284c7'}}>模合</div>
-          <div style={{fontSize: 14, color: '#64748b', marginTop: 8}}>データを読み込み中...</div>
-        </div>
-      </div>
-    );
-  }
+  if (!selectedGroup) return <div style={S.loading}>読み込み中...</div>;
 
   return (
     <div style={S.container}>
       <header style={S.header}>
         <div style={S.headerInner}>
-          <div style={S.logo}>
-            <span>🌺</span>
-            <span style={S.logoText}>模合</span>
-            {isSaving && <span style={{fontSize: 10, marginLeft: 8, opacity: 0.7}}>保存中...</span>}
-            {!isSaving && lastSaved && <span style={{fontSize: 10, marginLeft: 8, opacity: 0.7}}>☁️</span>}
-          </div>
+          <div style={S.logo}><span>🌺</span><span style={S.logoText}>模合</span></div>
           {isAdmin ? (
             <button style={S.adminBadge} onClick={handleLogout}>👑管理者 ログアウト</button>
           ) : (
