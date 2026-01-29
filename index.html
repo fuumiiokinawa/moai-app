@@ -1245,7 +1245,6 @@ function MoaiManager() {
                     <div style={S.memberNum}>{i + 1}</div>
                     <div style={S.memberInfo}>
                       <div style={S.memberName}>{m.name}</div>
-                      {m.memo && <div style={S.memberMemo}>📝 {m.memo}</div>}
                     </div>
                     <div style={S.memberBtns}>
                       <button style={S.editBtn} onClick={() => { setEditingMember(m); setShowModal('editMember'); }}>✎</button>
@@ -1703,8 +1702,6 @@ function MemberForm({ member, onSubmit, onCancel }) {
   const [accountType, setAccountType] = React.useState(member?.accountType || '普通');
   const [accountNumber, setAccountNumber] = React.useState(member?.accountNumber || '');
   const [accountHolder, setAccountHolder] = React.useState(member?.accountHolder || '');
-  const [carryOver, setCarryOver] = React.useState((member?.carryOver || 0) / 1000);
-  const [memo, setMemo] = React.useState(member?.memo || '');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>{member ? '✎ 編集' : '+ 追加'}</h3>
@@ -1724,11 +1721,9 @@ function MemberForm({ member, onSubmit, onCancel }) {
         <input type="text" value={accountHolder} onChange={e => setAccountHolder(e.target.value)} style={S.input} placeholder="口座名義（カナ）" />
       </div>
       
-      <input type="number" value={carryOver} onChange={e => setCarryOver(+e.target.value)} style={{...S.input, marginTop: 8}} placeholder="繰越(千円)" />
-      <input type="text" value={memo} onChange={e => setMemo(e.target.value)} style={S.input} placeholder="メモ" />
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
-        <button style={S.submitBtn} onClick={() => onSubmit({ name, bankName, branchName, accountType, accountNumber, accountHolder, carryOver, memo })} disabled={!name}>{member ? '更新' : '追加'}</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ name, bankName, branchName, accountType, accountNumber, accountHolder })} disabled={!name}>{member ? '更新' : '追加'}</button>
       </div>
     </div>
   );
