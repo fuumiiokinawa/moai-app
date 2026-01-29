@@ -820,6 +820,7 @@ function MoaiManager() {
             { id: 'receive', icon: '🎯', label: '受取' },
             { id: 'table', icon: '📊', label: '一覧' },
             { id: 'history', icon: '📜', label: '履歴' },
+            { id: 'help', icon: '❓', label: 'ヘルプ' },
           ].map(t => (
             <button key={t.id} style={{...S.navBtn, ...(currentView === t.id ? S.navActive : {})}} onClick={() => setCurrentView(t.id)}>
               <span>{t.icon}</span><span style={S.navLabel}>{t.label}</span>
@@ -1390,6 +1391,11 @@ function MoaiManager() {
               )}
             </div>
           </div>
+        )}
+
+        {/* ヘルプ */}
+        {currentView === 'help' && (
+          <HelpView isAdmin={isAdmin} group={selectedGroup} />
         )}
       </main>
 
@@ -2041,8 +2047,437 @@ function ReceiveOrderModal({ group, receiveOrder, onClose }) {
   );
 }
 
+// ヘルプ・マニュアル画面
+function HelpView({ isAdmin, group }) {
+  const APP_VERSION = '4.0';
+  const LAST_UPDATE = '2025年1月';
+  const [showMemberGuide, setShowMemberGuide] = React.useState(false);
+  const [showAdminManual, setShowAdminManual] = React.useState(false);
+  const [expandedSection, setExpandedSection] = React.useState(null);
+  
+  // PDFダウンロード関数
+  const downloadPDF = async (type) => {
+    if (!window.jspdf) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      document.head.appendChild(script);
+      await new Promise(resolve => script.onload = resolve);
+    }
+    
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    doc.setFontSize(24);
+    doc.setTextColor(30, 41, 59);
+    doc.text('MOAI App', 105, 30, { align: 'center' });
+    doc.setFontSize(18);
+    doc.text(type === 'member' ? 'Member Guide' : 'Admin Manual', 105, 45, { align: 'center' });
+    doc.setFontSize(12);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Version ${APP_VERSION} | ${LAST_UPDATE}`, 105, 60, { align: 'center' });
+    
+    doc.save(type === 'member' ? 'moai_member_guide.pdf' : 'moai_admin_manual.pdf');
+  };
+
+  // メンバー用ガイドの内容
+  const MemberGuideContent = () => (
+    <div style={{background: '#fff', borderRadius: 12, overflow: 'hidden'}}>
+      {/* 基本の使い方 */}
+      <Section title="📱 基本の使い方" defaultOpen={true}>
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={styles.tableIcon}>🏠</span><span style={styles.tableLabel}>ホーム</span><span style={styles.tableDesc}>全体の状況、次回飲み会予定</span></div>
+          <div style={styles.tableRow}><span style={styles.tableIcon}>🍻</span><span style={styles.tableLabel}>飲み会</span><span style={styles.tableDesc}>出欠回答、店舗投票</span></div>
+          <div style={styles.tableRow}><span style={styles.tableIcon}>👥</span><span style={styles.tableLabel}>メンバー</span><span style={styles.tableDesc}>メンバー一覧、入金状況</span></div>
+          <div style={styles.tableRow}><span style={styles.tableIcon}>📊</span><span style={styles.tableLabel}>一覧</span><span style={styles.tableDesc}>全員の入金・受取状況</span></div>
+        </div>
+      </Section>
+      
+      {/* 飲み会の出欠回答 */}
+      <Section title="🍻 飲み会の出欠回答">
+        <ol style={styles.ol}>
+          <li>「🍻 飲み会」タブを開く</li>
+          <li>自分の名前を選択</li>
+          <li>⭕（参加）/ 🔺（未定）/ ❌（不参加）をタップ</li>
+          <li>自動で保存されます！</li>
+        </ol>
+        <div style={styles.tip}>💡 締切日までに回答してください</div>
+      </Section>
+      
+      {/* 入金状況の確認 */}
+      <Section title="💰 入金状況の確認">
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#d1fae5'}}>✅</span><span style={styles.tableLabel}>緑</span><span style={styles.tableDesc}>支払済み</span></div>
+          <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#fee2e2'}}>　</span><span style={styles.tableLabel}>赤</span><span style={styles.tableDesc}>未払い</span></div>
+          <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#fef3c7'}}>相</span><span style={styles.tableLabel}>黄</span><span style={styles.tableDesc}>受取金から相殺</span></div>
+        </div>
+      </Section>
+      
+      {/* 参加率ランキング */}
+      <Section title="🏆 参加率ランキング">
+        <p style={styles.p}>ホーム画面の下部に飲み会参加率が表示されます。</p>
+        <ul style={styles.ul}>
+          <li>👑 皆勤賞: 全ての飲み会に参加した人</li>
+          <li>🥇🥈🥉 上位3名にメダル表示</li>
+          <li>参加率が高いと印象アップ！</li>
+        </ul>
+      </Section>
+      
+      {/* ホーム画面に追加 */}
+      <Section title="📲 ホーム画面に追加">
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>iPhoneの場合</div>
+          <ol style={styles.ol}>
+            <li>Safariでアプリを開く</li>
+            <li>画面下の共有ボタン（⬆）をタップ</li>
+            <li>「ホーム画面に追加」を選択</li>
+            <li>「追加」をタップ</li>
+          </ol>
+        </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>Androidの場合</div>
+          <ol style={styles.ol}>
+            <li>Chromeでアプリを開く</li>
+            <li>「インストール」バナーが表示されたらタップ</li>
+          </ol>
+        </div>
+      </Section>
+    </div>
+  );
+
+  // 管理者マニュアルの内容
+  const AdminManualContent = () => (
+    <div style={{background: '#fff', borderRadius: 12, overflow: 'hidden'}}>
+      {/* ログイン */}
+      <Section title="🔐 ログイン方法" defaultOpen={true}>
+        <ol style={styles.ol}>
+          <li>右上の「🔓 ログイン」ボタンをタップ</li>
+          <li>パスワードを入力（初期: 1234）</li>
+          <li>「ログイン」をタップ</li>
+          <li>「👑管理者」と表示されれば成功！</li>
+        </ol>
+        <div style={styles.tip}>💡 パスワードは設定画面から変更できます</div>
+      </Section>
+      
+      {/* 入金管理 */}
+      <Section title="💰 入金管理">
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>通常の入金記録</div>
+          <ol style={styles.ol}>
+            <li>「✅ 入金」タブを開く</li>
+            <li>対象月を選択</li>
+            <li>メンバーを選択</li>
+            <li>「入金を記録」をタップ</li>
+          </ol>
+        </div>
+        <div style={styles.subSection}>
+          <div style={{...styles.subTitle, color: '#0ea5e9'}}>🆕 複数月まとめて入金（導入時に便利！）</div>
+          <ol style={styles.ol}>
+            <li>「📅 複数月まとめて入金」をON</li>
+            <li>開始月〜終了月を選択</li>
+            <li>メンバーを選択</li>
+            <li>一括で記録！</li>
+          </ol>
+          <div style={styles.tip}>💡 過去1年分を一度に入力できます</div>
+        </div>
+      </Section>
+      
+      {/* 受取管理 */}
+      <Section title="🎯 受取管理">
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>順番制</span><span style={styles.tableDesc}>メンバーリスト順に自動で次の受取者を表示</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>抽選制</span><span style={styles.tableDesc}>未受取者からランダムに選出</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>希望優先</span><span style={styles.tableDesc}>受取希望を出した人を優先して抽選</span></div>
+        </div>
+      </Section>
+      
+      {/* 飲み会管理 */}
+      <Section title="🍻 飲み会管理">
+        <ol style={styles.ol}>
+          <li>飲み会を作成（日時・締切を設定）</li>
+          <li>メンバーが出欠を投票</li>
+          <li>候補店舗を追加</li>
+          <li>メンバーが店舗に投票</li>
+          <li>幹事が店舗を確定</li>
+          <li>LINE通知で全員にお知らせ</li>
+          <li>開催後、経費を記録</li>
+          <li>飲み会を完了にする</li>
+        </ol>
+      </Section>
+      
+      {/* 積立金管理 */}
+      <Section title="💎 積立金管理">
+        <ol style={styles.ol}>
+          <li>ホーム画面の「💎積立」ボタンをタップ</li>
+          <li>使用目的を入力（例: 忘年会補助）</li>
+          <li>金額を入力</li>
+          <li>「使用する」をタップ</li>
+        </ol>
+        <div style={styles.warning}>⚠️ 使用履歴は全メンバーに公開されます</div>
+      </Section>
+      
+      {/* 設定変更 */}
+      <Section title="⚙️ 設定変更">
+        <p style={styles.p}>画面右下の「⚙️」ボタンから設定画面を開けます。</p>
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>グループ名</span><span style={styles.tableDesc}>模合の名前を変更</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>月額</span><span style={styles.tableDesc}>毎月の支払額</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>積立額</span><span style={styles.tableDesc}>毎月の積立金額</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>開催スケジュール</span><span style={styles.tableDesc}>第N週のX曜日を自動提案</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>パスワード</span><span style={styles.tableDesc}>管理者パスワードの変更</span></div>
+        </div>
+      </Section>
+      
+      {/* LINE通知 */}
+      <Section title="📱 LINE通知の作成">
+        <p style={styles.p}>コピペで使えるメッセージを自動生成できます。</p>
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>入金リマインド</span><span style={styles.tableDesc}>月初めに支払いを促す</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>滞納催促</span><span style={styles.tableDesc}>2ヶ月以上未払いの人へ</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>飲み会お知らせ</span><span style={styles.tableDesc}>日時・場所・参加者を通知</span></div>
+        </div>
+      </Section>
+      
+      {/* トラブルシューティング */}
+      <Section title="🔧 トラブルシューティング">
+        <div style={styles.table}>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>ログインできない</span><span style={styles.tableDesc}>パスワードを確認</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>データが消えた</span><span style={styles.tableDesc}>再読み込みしてください</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>入金を間違えた</span><span style={styles.tableDesc}>履歴画面から「取消」</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>画面が真っ白</span><span style={styles.tableDesc}>ブラウザを更新</span></div>
+        </div>
+      </Section>
+    </div>
+  );
+
+  // セクションコンポーネント
+  function Section({ title, children, defaultOpen = false }) {
+    const [isOpen, setIsOpen] = React.useState(defaultOpen);
+    return (
+      <div style={{borderBottom: '1px solid #e2e8f0'}}>
+        <button 
+          onClick={() => setIsOpen(!isOpen)}
+          style={{
+            width: '100%',
+            padding: '14px 16px',
+            background: isOpen ? '#f8fafc' : '#fff',
+            border: 'none',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#334155'
+          }}
+        >
+          <span>{title}</span>
+          <span style={{color: '#94a3b8', transition: 'transform 0.2s', transform: isOpen ? 'rotate(180deg)' : 'rotate(0)'}}></span>
+        </button>
+        {isOpen && (
+          <div style={{padding: '0 16px 16px 16px'}}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // スタイル
+  const styles = {
+    ol: { margin: 0, paddingLeft: 20, color: '#64748b', fontSize: 13, lineHeight: 2 },
+    ul: { margin: 0, paddingLeft: 20, color: '#64748b', fontSize: 13, lineHeight: 2, listStyle: 'disc' },
+    p: { margin: '0 0 10px 0', color: '#64748b', fontSize: 13, lineHeight: 1.6 },
+    tip: { background: '#ecfdf5', color: '#065f46', padding: '10px 12px', borderRadius: 8, fontSize: 12, marginTop: 10 },
+    warning: { background: '#fef3c7', color: '#92400e', padding: '10px 12px', borderRadius: 8, fontSize: 12, marginTop: 10 },
+    table: { display: 'flex', flexDirection: 'column', gap: 8 },
+    tableRow: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 },
+    tableIcon: { width: 28, height: 28, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f1f5f9', fontSize: 14 },
+    tableLabel: { fontWeight: 600, color: '#334155', minWidth: 80 },
+    tableDesc: { color: '#64748b', flex: 1 },
+    subSection: { marginBottom: 16 },
+    subTitle: { fontWeight: 600, color: '#334155', marginBottom: 8, fontSize: 13 },
+  };
+
+  return (
+    <div style={S.view}>
+      <h3 style={S.viewTitle}>❓ ヘルプ・マニュアル</h3>
+      
+      {/* アプリ情報 */}
+      <div style={{...S.card, background: 'linear-gradient(135deg, #1e293b, #334155)', color: '#fff'}}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12}}>
+          <svg width="48" height="48" viewBox="0 0 100 100">
+            <defs>
+              <linearGradient id="helpIconBg" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" style={{stopColor:'#6b7280'}} />
+                <stop offset="10%" style={{stopColor:'#374151'}} />
+                <stop offset="90%" style={{stopColor:'#111827'}} />
+                <stop offset="100%" style={{stopColor:'#1f2937'}} />
+              </linearGradient>
+            </defs>
+            <rect width="100" height="100" rx="22" fill="url(#helpIconBg)"/>
+            <rect x="10" y="8" width="80" height="3" rx="1.5" fill="rgba(255,255,255,0.5)"/>
+            <text x="50" y="72" textAnchor="middle" fontSize="65" fontWeight="900" fill="white" fontFamily="sans-serif">モ</text>
+          </svg>
+          <div>
+            <div style={{fontSize: 18, fontWeight: 700}}>模合アプリ</div>
+            <div style={{fontSize: 13, color: '#94a3b8'}}>Version {APP_VERSION}</div>
+          </div>
+        </div>
+        <div style={{fontSize: 12, color: '#94a3b8'}}>
+          最終更新: {LAST_UPDATE}
+        </div>
+      </div>
+      
+      {/* メンバー用ガイド */}
+      <div style={S.card}>
+        <button 
+          onClick={() => setShowMemberGuide(!showMemberGuide)}
+          style={{
+            width: '100%',
+            padding: 16,
+            background: showMemberGuide ? '#0ea5e9' : '#f0f9ff',
+            border: '2px solid #0ea5e9',
+            borderRadius: 12,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12
+          }}
+        >
+          <span style={{fontSize: 28}}>📘</span>
+          <div style={{textAlign: 'left', flex: 1}}>
+            <div style={{fontWeight: 700, color: showMemberGuide ? '#fff' : '#0369a1', fontSize: 15}}>メンバー用ガイド</div>
+            <div style={{fontSize: 12, color: showMemberGuide ? '#bae6fd' : '#64748b'}}>基本的な使い方・出欠回答の方法</div>
+          </div>
+          <span style={{color: showMemberGuide ? '#fff' : '#0ea5e9', fontSize: 20}}>{showMemberGuide ? '▲' : '▼'}</span>
+        </button>
+        
+        {showMemberGuide && (
+          <div style={{marginTop: 12}}>
+            <MemberGuideContent />
+            <button 
+              onClick={() => downloadPDF('member')}
+              style={{
+                width: '100%',
+                marginTop: 12,
+                padding: '12px',
+                background: '#f1f5f9',
+                border: '1px solid #cbd5e1',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 13,
+                color: '#64748b'
+              }}
+            >
+              📥 PDFでダウンロード
+            </button>
+          </div>
+        )}
+      </div>
+      
+      {/* 管理者マニュアル */}
+      <div style={S.card}>
+        {isAdmin ? (
+          <>
+            <button 
+              onClick={() => setShowAdminManual(!showAdminManual)}
+              style={{
+                width: '100%',
+                padding: 16,
+                background: showAdminManual ? '#f59e0b' : 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                border: '2px solid #f59e0b',
+                borderRadius: 12,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12
+              }}
+            >
+              <span style={{fontSize: 28}}>📙</span>
+              <div style={{textAlign: 'left', flex: 1}}>
+                <div style={{fontWeight: 700, color: showAdminManual ? '#fff' : '#92400e', fontSize: 15}}>👑 管理者マニュアル</div>
+                <div style={{fontSize: 12, color: showAdminManual ? '#fef3c7' : '#a16207'}}>入金管理・飲み会作成・設定変更</div>
+              </div>
+              <span style={{color: showAdminManual ? '#fff' : '#92400e', fontSize: 20}}>{showAdminManual ? '▲' : '▼'}</span>
+            </button>
+            
+            {showAdminManual && (
+              <div style={{marginTop: 12}}>
+                <AdminManualContent />
+                <button 
+                  onClick={() => downloadPDF('admin')}
+                  style={{
+                    width: '100%',
+                    marginTop: 12,
+                    padding: '12px',
+                    background: '#fef3c7',
+                    border: '1px solid #f59e0b',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    color: '#92400e'
+                  }}
+                >
+                  📥 PDFでダウンロード
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{
+            width: '100%',
+            padding: 16,
+            background: '#f1f5f9',
+            border: '2px dashed #cbd5e1',
+            borderRadius: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            opacity: 0.7
+          }}>
+            <span style={{fontSize: 28}}>🔒</span>
+            <div style={{textAlign: 'left', flex: 1}}>
+              <div style={{fontWeight: 700, color: '#64748b', fontSize: 15}}>管理者マニュアル</div>
+              <div style={{fontSize: 12, color: '#94a3b8'}}>ログイン後に閲覧できます</div>
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* よくある質問 */}
+      <div style={S.card}>
+        <h4 style={S.subTitle}>❔ よくある質問</h4>
+        
+        {[
+          { q: 'パスワードを忘れた', a: '幹事に連絡してリセットしてもらってください' },
+          { q: '入金したのに未払いになっている', a: '幹事に連絡して入金記録を確認してもらってください' },
+          { q: 'データが消えた', a: 'データはクラウドに保存されています。画面を再読み込みしてください' },
+        ].map((item, i) => (
+          <div key={i} style={{marginBottom: i < 2 ? 14 : 0, paddingBottom: i < 2 ? 14 : 0, borderBottom: i < 2 ? '1px solid #e2e8f0' : 'none'}}>
+            <div style={{fontWeight: 600, color: '#334155', marginBottom: 4}}>Q. {item.q}</div>
+            <div style={{color: '#64748b', fontSize: 13}}>A. {item.a}</div>
+          </div>
+        ))}
+      </div>
+      
+      {/* グループ情報 */}
+      <div style={{...S.card, background: '#f8fafc'}}>
+        <h4 style={S.subTitle}>📋 グループ情報</h4>
+        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13}}>
+          <div><span style={{color: '#64748b'}}>グループ名:</span> <strong>{group.name}</strong></div>
+          <div><span style={{color: '#64748b'}}>メンバー:</span> <strong>{group.members.length}名</strong></div>
+          <div><span style={{color: '#64748b'}}>月額:</span> <strong>¥{(group.monthlyAmount + group.savingsAmount).toLocaleString()}</strong></div>
+          <div><span style={{color: '#64748b'}}>開始:</span> <strong>{group.startMonth || '-'}</strong></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, isAdmin }) {
   const [selected, setSelected] = React.useState([]);
+  const [multiMonth, setMultiMonth] = React.useState(false);
+  const [monthRange, setMonthRange] = React.useState({ from: month, to: month });
   const status = getMonthlyStatus(month);
   const toggle = (id) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
@@ -2053,32 +2488,111 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
     setSelected([]);
   };
 
+  // 複数月の場合の計算
+  const getMonthsBetween = () => {
+    if (!multiMonth) return [month];
+    const months = [];
+    const from = new Date(monthRange.from + '-01');
+    const to = new Date(monthRange.to + '-01');
+    while (from <= to) {
+      months.push(from.toISOString().slice(0, 7));
+      from.setMonth(from.getMonth() + 1);
+    }
+    return months;
+  };
+
+  const totalMonths = getMonthsBetween().length;
+  const totalAmount = (group.monthlyAmount + group.savingsAmount) * selected.length * totalMonths;
+
   return (
     <div style={S.view}>
       <h3 style={S.viewTitle}>✅ 一括入金</h3>
-      <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
-        <button style={{...S.monthNavBtn, borderRadius: '10px 0 0 10px'}} onClick={() => changeMonth(-1)}>◀</button>
-        <input type="month" value={month} onChange={e => { setMonth(e.target.value); setSelected([]); }} style={{...S.input, flex: 1, borderRadius: 0, textAlign: 'center'}} />
-        <button style={{...S.monthNavBtn, borderRadius: '0 10px 10px 0'}} onClick={() => changeMonth(1)}>▶</button>
+      
+      {/* 複数月モード切り替え */}
+      <div style={{marginBottom: 12}}>
+        <button 
+          style={{
+            ...S.selectBtn, 
+            background: multiMonth ? '#0ea5e9' : '#f1f5f9',
+            color: multiMonth ? '#fff' : '#64748b',
+            marginRight: 8
+          }} 
+          onClick={() => setMultiMonth(!multiMonth)}
+        >
+          {multiMonth ? '✓ 複数月モード' : '📅 複数月まとめて入金'}
+        </button>
+        {multiMonth && <span style={{fontSize: 12, color: '#0ea5e9'}}>導入時に便利！</span>}
       </div>
-      <div style={S.bulkInfo}><span>選択: {selected.length}名</span><span>¥{((group.monthlyAmount + group.savingsAmount) * selected.length).toLocaleString()}</span></div>
+
+      {multiMonth ? (
+        /* 複数月選択UI */
+        <div style={{background: '#f0f9ff', borderRadius: 12, padding: 14, marginBottom: 12, border: '2px solid #0ea5e9'}}>
+          <div style={{fontSize: 13, color: '#0369a1', marginBottom: 10, fontWeight: 600}}>📆 期間を選択</div>
+          <div style={{display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'}}>
+            <input 
+              type="month" 
+              value={monthRange.from} 
+              onChange={e => setMonthRange(p => ({...p, from: e.target.value}))} 
+              style={{...S.input, width: 130}} 
+            />
+            <span style={{color: '#64748b'}}>〜</span>
+            <input 
+              type="month" 
+              value={monthRange.to} 
+              onChange={e => setMonthRange(p => ({...p, to: e.target.value}))} 
+              style={{...S.input, width: 130}} 
+            />
+          </div>
+          <div style={{marginTop: 10, fontSize: 14, color: '#0369a1'}}>
+            <strong>{totalMonths}ヶ月分</strong>を一括記録します
+          </div>
+        </div>
+      ) : (
+        /* 通常の月選択UI */
+        <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+          <button style={{...S.monthNavBtn, borderRadius: '10px 0 0 10px'}} onClick={() => changeMonth(-1)}>◀</button>
+          <input type="month" value={month} onChange={e => { setMonth(e.target.value); setSelected([]); }} style={{...S.input, flex: 1, borderRadius: 0, textAlign: 'center'}} />
+          <button style={{...S.monthNavBtn, borderRadius: '0 10px 10px 0'}} onClick={() => changeMonth(1)}>▶</button>
+        </div>
+      )}
+
+      <div style={S.bulkInfo}>
+        <span>選択: {selected.length}名 × {totalMonths}ヶ月</span>
+        <span style={{fontSize: 18, fontWeight: 700, color: '#0ea5e9'}}>¥{totalAmount.toLocaleString()}</span>
+      </div>
       <div style={S.bulkBtns}>
-        <button style={S.selectBtn} onClick={() => setSelected(status.unpaid.map(m => m.id))}>全選択</button>
+        <button style={S.selectBtn} onClick={() => setSelected(group.members.map(m => m.id))}>全選択</button>
         <button style={S.selectBtn} onClick={() => setSelected([])}>解除</button>
       </div>
       <div style={S.bulkList}>
         {group.members.map(m => {
-          const isPaid = status.paid.some(p => p.id === m.id);
+          const isPaid = !multiMonth && status.paid.some(p => p.id === m.id);
           const isSel = selected.includes(m.id);
           return (
             <div key={m.id} style={{...S.bulkItem, background: isPaid ? '#d1fae5' : isSel ? '#dbeafe' : '#fff', opacity: isPaid ? 0.6 : 1}} onClick={() => !isPaid && toggle(m.id)}>
               <span>{isPaid ? '✅' : isSel ? '☑️' : '⬜'}</span>
               <span>{m.name}</span>
+              {multiMonth && isSel && <span style={{marginLeft: 'auto', fontSize: 12, color: '#0ea5e9'}}>¥{((group.monthlyAmount + group.savingsAmount) * totalMonths).toLocaleString()}</span>}
             </div>
           );
         })}
       </div>
-      {isAdmin && selected.length > 0 && <button style={S.fixedBtn} onClick={() => onSubmit(selected, month)}>{selected.length}名の入金を記録</button>}
+      {isAdmin && selected.length > 0 && (
+        <button 
+          style={S.fixedBtn} 
+          onClick={() => {
+            if (multiMonth) {
+              // 複数月の場合、各月ごとに入金を記録
+              const months = getMonthsBetween();
+              months.forEach(m => onSubmit(selected, m));
+            } else {
+              onSubmit(selected, month);
+            }
+          }}
+        >
+          {selected.length}名 × {totalMonths}ヶ月の入金を記録
+        </button>
+      )}
     </div>
   );
 }
