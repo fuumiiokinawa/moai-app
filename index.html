@@ -464,6 +464,34 @@ function MoaiManager() {
     return null;
   };
 
+  // 飲み会参加率を計算
+  const getMemberParticipationStats = () => {
+    const events = selectedGroup?.events || [];
+    const completedEvents = events.filter(e => e.status === 'completed' || e.status === 'confirmed');
+    
+    if (completedEvents.length === 0) return [];
+    
+    return selectedGroup.members.map(member => {
+      let attended = 0;
+      completedEvents.forEach(event => {
+        const attendance = event.attendance || {};
+        if (attendance[member.id] === 'yes') attended++;
+      });
+      
+      const rate = Math.round((attended / completedEvents.length) * 100);
+      const isPerfect = attended === completedEvents.length && completedEvents.length > 0;
+      
+      return {
+        id: member.id,
+        name: member.name,
+        attended,
+        total: completedEvents.length,
+        rate,
+        isPerfect
+      };
+    }).sort((a, b) => b.rate - a.rate);
+  };
+
   // 抽選機能（受取希望者優先、受取済み除外）
   const handleLottery = () => {
     const notReceived = getMembersNotReceived();
@@ -858,9 +886,75 @@ function MoaiManager() {
             })()}
 
             {getCurrentEvent() && (
-              <div style={S.partyBanner}>
-                <div>🍻 {getCurrentEvent().date} {getCurrentEvent().time}</div>
-                <button style={S.partyBannerBtn} onClick={() => setCurrentView('party')}>詳細 →</button>
+              <div style={{background: 'linear-gradient(135deg, #1e293b, #334155)', borderRadius: 16, padding: 18, color: '#fff', marginBottom: 6}}>
+                <div style={{fontSize: 12, color: '#94a3b8', marginBottom: 8}}>🗓️ 次回模合予定</div>
+                <div style={{fontSize: 20, fontWeight: 700, marginBottom: 12}}>
+                  {getCurrentEvent().date} ({['日','月','火','水','木','金','土'][new Date(getCurrentEvent().date).getDay()]}) {getCurrentEvent().time}〜
+                </div>
+                
+                {/* 確定した店舗情報 */}
+                {getCurrentEvent().confirmedVenue && (() => {
+                  const venue = getCurrentEvent().venues?.find(v => v.id === getCurrentEvent().confirmedVenue);
+                  return venue ? (
+                    <div style={{background: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 14, marginBottom: 12}}>
+                      <div style={{fontSize: 16, fontWeight: 600, marginBottom: 6}}>📍 {venue.name}</div>
+                      {venue.address && <div style={{fontSize: 13, color: '#cbd5e1', marginBottom: 4}}>{venue.address}</div>}
+                      {venue.budget && <div style={{fontSize: 13, color: '#fbbf24'}}>💰 {venue.budget}</div>}
+                      {venue.url && <a href={venue.url} target="_blank" rel="noreferrer" style={{color: '#38bdf8', fontSize: 13, textDecoration: 'underline'}}>🔗 お店の詳細</a>}
+                    </div>
+                  ) : null;
+                })()}
+                
+                {/* 参加状況 */}
+                {(() => {
+                  const att = getCurrentEvent().attendance || {};
+                  const yes = Object.entries(att).filter(([_, v]) => v === 'yes').length;
+                  const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').length;
+                  const no = Object.entries(att).filter(([_, v]) => v === 'no').length;
+                  const total = selectedGroup.members.length;
+                  
+                  return (
+                    <div>
+                      <div style={{fontSize: 13, color: '#94a3b8', marginBottom: 8}}>参加状況</div>
+                      <div style={{display: 'flex', gap: 8, marginBottom: 10}}>
+                        <div style={{flex: 1, background: '#10b981', borderRadius: 8, padding: '8px 12px', textAlign: 'center'}}>
+                          <div style={{fontSize: 20, fontWeight: 700}}>⭕ {yes}</div>
+                          <div style={{fontSize: 11}}>参加</div>
+                        </div>
+                        <div style={{flex: 1, background: '#f59e0b', borderRadius: 8, padding: '8px 12px', textAlign: 'center'}}>
+                          <div style={{fontSize: 20, fontWeight: 700}}>🔺 {maybe}</div>
+                          <div style={{fontSize: 11}}>未定</div>
+                        </div>
+                        <div style={{flex: 1, background: '#64748b', borderRadius: 8, padding: '8px 12px', textAlign: 'center'}}>
+                          <div style={{fontSize: 20, fontWeight: 700}}>❌ {no}</div>
+                          <div style={{fontSize: 11}}>不参加</div>
+                        </div>
+                        <div style={{flex: 1, background: '#475569', borderRadius: 8, padding: '8px 12px', textAlign: 'center'}}>
+                          <div style={{fontSize: 20, fontWeight: 700}}>❓ {total - yes - maybe - no}</div>
+                          <div style={{fontSize: 11}}>未回答</div>
+                        </div>
+                      </div>
+                      {/* 参加者名 */}
+                      {yes > 0 && (
+                        <div style={{fontSize: 12, color: '#94a3b8'}}>
+                          参加: {Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => selectedGroup.members.find(m => m.id === id)?.name).filter(Boolean).join('、')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                
+                <button style={{width: '100%', marginTop: 12, padding: '12px', background: '#0ea5e9', border: 'none', borderRadius: 10, color: '#fff', fontWeight: 700, fontSize: 15, cursor: 'pointer'}} onClick={() => setCurrentView('party')}>
+                  出欠を回答する →
+                </button>
+              </div>
+            )}
+            
+            {!getCurrentEvent() && getNextPartyDate() && (
+              <div style={{background: '#f8fafc', border: '2px dashed #cbd5e1', borderRadius: 14, padding: 16, textAlign: 'center'}}>
+                <div style={{fontSize: 14, color: '#64748b', marginBottom: 6}}>📅 次回開催予定</div>
+                <div style={{fontSize: 18, fontWeight: 700, color: '#334155'}}>{getNextPartyDate()}</div>
+                {isAdmin && <button style={{...S.linkBtn, marginTop: 8}} onClick={() => setShowModal('createEvent')}>飲み会を作成 →</button>}
               </div>
             )}
 
@@ -1005,6 +1099,82 @@ function MoaiManager() {
                 </div>
               )}
             </div>
+
+            {/* 🏆 飲み会参加率ランキング */}
+            {(() => {
+              const stats = getMemberParticipationStats();
+              const completedEvents = (selectedGroup?.events || []).filter(e => e.status === 'completed' || e.status === 'confirmed');
+              
+              if (completedEvents.length === 0) return null;
+              
+              const perfectMembers = stats.filter(s => s.isPerfect);
+              
+              return (
+                <div style={S.card}>
+                  <h4 style={S.subTitle}>🏆 飲み会参加ランキング</h4>
+                  <div style={{fontSize: 12, color: '#64748b', marginBottom: 12}}>
+                    過去{completedEvents.length}回の飲み会での参加率
+                  </div>
+                  
+                  {/* 皆勤賞 */}
+                  {perfectMembers.length > 0 && (
+                    <div style={{background: 'linear-gradient(135deg, #fef3c7, #fde68a)', borderRadius: 12, padding: 14, marginBottom: 14, border: '2px solid #f59e0b'}}>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+                        <span style={{fontSize: 24}}>👑</span>
+                        <span style={{fontWeight: 700, color: '#92400e'}}>皆勤賞！</span>
+                      </div>
+                      <div style={{display: 'flex', flexWrap: 'wrap', gap: 8}}>
+                        {perfectMembers.map(m => (
+                          <span key={m.id} style={{background: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 14, fontWeight: 600, color: '#92400e', boxShadow: '0 2px 4px rgba(0,0,0,0.1)'}}>
+                            ⭐ {m.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* ランキング（バー付き） */}
+                  <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+                    {stats.slice(0, 5).map((member, index) => {
+                      const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+                      const barColor = member.rate >= 80 ? '#10b981' : member.rate >= 50 ? '#f59e0b' : '#ef4444';
+                      
+                      return (
+                        <div key={member.id}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4}}>
+                            <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                              <span style={{fontSize: 16, width: 24}}>{medal || `${index + 1}.`}</span>
+                              <span style={{fontWeight: member.isPerfect ? 700 : 500, color: member.isPerfect ? '#92400e' : '#334155'}}>
+                                {member.name}
+                              </span>
+                            </div>
+                            <div style={{textAlign: 'right'}}>
+                              <span style={{fontWeight: 700, color: barColor}}>{member.rate}%</span>
+                              <span style={{fontSize: 12, color: '#94a3b8', marginLeft: 6}}>({member.attended}/{member.total})</span>
+                            </div>
+                          </div>
+                          <div style={{background: '#e2e8f0', borderRadius: 6, height: 8, overflow: 'hidden'}}>
+                            <div style={{
+                              background: barColor,
+                              height: '100%',
+                              width: `${member.rate}%`,
+                              borderRadius: 6,
+                              transition: 'width 0.5s ease'
+                            }}></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {stats.length > 5 && (
+                    <div style={{marginTop: 12, textAlign: 'center', fontSize: 13, color: '#64748b'}}>
+                      他 {stats.length - 5}名
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
