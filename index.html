@@ -745,6 +745,32 @@ function MoaiManager() {
     notify('飲み会を完了にしました');
   };
 
+  // 飲み会編集
+  const handleEditEvent = (eventId, data) => {
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, ...data } : e)
+    };
+    updated = addLog('飲み会編集', data.date, updated);
+    updateGroup(updated);
+    notify('飲み会を更新しました');
+    setShowModal(null);
+    setEditingEvent(null);
+  };
+
+  // 飲み会削除
+  const handleDeleteEvent = (eventId) => {
+    if (!confirm('この飲み会を削除しますか？')) return;
+    const event = selectedGroup.events.find(e => e.id === eventId);
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.filter(e => e.id !== eventId)
+    };
+    updated = addLog('飲み会削除', event?.date, updated);
+    updateGroup(updated);
+    notify('飲み会を削除しました');
+  };
+
   // 飲み会会計記録
   const handleRecordExpense = (eventId, expense) => {
     let updated = {
@@ -955,7 +981,7 @@ function MoaiManager() {
               <div style={{background: '#f8fafc', border: '2px dashed #cbd5e1', borderRadius: 14, padding: 16, textAlign: 'center'}}>
                 <div style={{fontSize: 14, color: '#64748b', marginBottom: 6}}>📅 次回開催予定</div>
                 <div style={{fontSize: 18, fontWeight: 700, color: '#334155'}}>{getNextPartyDate()}</div>
-                {isAdmin && <button style={{...S.linkBtn, marginTop: 8}} onClick={() => setShowModal('createEvent')}>飲み会を作成 →</button>}
+                <button style={{...S.linkBtn, marginTop: 8}} onClick={() => setShowModal('createEvent')}>飲み会を作成 →</button>
               </div>
             )}
 
@@ -995,14 +1021,13 @@ function MoaiManager() {
               )}
             </div>
 
-            {isAdmin && (
-              <div style={S.quickBtns}>
-                <button style={S.qBtn} onClick={() => setShowModal('payment')}>💰入金</button>
-                <button style={{...S.qBtn, background: '#8b5cf6'}} onClick={() => setShowModal('receive')}>🎯受取</button>
-                <button style={{...S.qBtn, background: '#f59e0b'}} onClick={() => setShowModal('createEvent')}>🍻飲み会</button>
-                <button style={{...S.qBtn, background: '#10b981'}} onClick={() => setShowModal('savingsUsage')}>💎積立</button>
-              </div>
-            )}
+            {/* クイックボタン: お金関連は管理者のみ、飲み会は全員 */}
+            <div style={S.quickBtns}>
+              {isAdmin && <button style={S.qBtn} onClick={() => setShowModal('payment')}>💰入金</button>}
+              {isAdmin && <button style={{...S.qBtn, background: '#8b5cf6'}} onClick={() => setShowModal('receive')}>🎯受取</button>}
+              <button style={{...S.qBtn, background: '#f59e0b'}} onClick={() => setShowModal('createEvent')}>🍻飲み会</button>
+              {isAdmin && <button style={{...S.qBtn, background: '#10b981'}} onClick={() => setShowModal('savingsUsage')}>💎積立</button>}
+            </div>
 
             {/* 次の受取者（順番制） */}
             <div style={S.card}>
@@ -1062,14 +1087,14 @@ function MoaiManager() {
                     })()
                   )}
                 </div>
-                <button style={S.lotteryBtn} onClick={handleLottery} disabled={getMembersNotReceived().length === 0}>
-                  🎲 抽選する
-                </button>
                 {isAdmin && (
-                  <button style={{...S.linkBtn, marginTop: 10, display: 'block'}} onClick={() => setShowModal('receiveRequest')}>
-                    + 受取希望を登録
+                  <button style={S.lotteryBtn} onClick={handleLottery} disabled={getMembersNotReceived().length === 0}>
+                    🎲 抽選する
                   </button>
                 )}
+                <button style={{...S.linkBtn, marginTop: 10, display: 'block'}} onClick={() => setShowModal('receiveRequest')}>
+                  + 受取希望を登録
+                </button>
               </div>
             )}
 
@@ -1188,6 +1213,8 @@ function MoaiManager() {
             pastEvents={getPastEvents()}
             getNextPartyDate={getNextPartyDate}
             onCreateEvent={() => setShowModal('createEvent')}
+            onEditEvent={(event) => { setEditingEvent(event); setShowModal('editEvent'); }}
+            onDeleteEvent={handleDeleteEvent}
             onAddVenue={handleAddVenue}
             onAddVenueFromPast={handleAddVenueFromPast}
             onDeleteVenue={handleDeleteVenue}
@@ -1206,11 +1233,12 @@ function MoaiManager() {
           <div style={S.view}>
             <div style={S.viewHeader}>
               <h3 style={S.viewTitle}>👥 メンバー</h3>
-              {isAdmin && <button style={S.addBtn} onClick={() => setShowModal('addMember')}>+</button>}
+              <button style={S.addBtn} onClick={() => setShowModal('addMember')}>+</button>
             </div>
             {selectedGroup.members.map((m, i) => {
               const bal = getMemberBalance(m.id);
               const receives = getActiveReceives().filter(r => r.winnerId === m.id);
+              const hasBank = m.bankName && m.accountNumber;
               return (
                 <div key={m.id} style={S.memberCard}>
                   <div style={S.memberTop}>
@@ -1219,18 +1247,33 @@ function MoaiManager() {
                       <div style={S.memberName}>{m.name}</div>
                       {m.memo && <div style={S.memberMemo}>📝 {m.memo}</div>}
                     </div>
-                    {isAdmin && (
-                      <div style={S.memberBtns}>
-                        <button style={S.editBtn} onClick={() => { setEditingMember(m); setShowModal('editMember'); }}>✎</button>
-                        <button style={S.delBtn} onClick={() => handleDeleteMember(m.id)}>×</button>
-                      </div>
-                    )}
+                    <div style={S.memberBtns}>
+                      <button style={S.editBtn} onClick={() => { setEditingMember(m); setShowModal('editMember'); }}>✎</button>
+                      {isAdmin && <button style={S.delBtn} onClick={() => handleDeleteMember(m.id)}>×</button>}
+                    </div>
                   </div>
                   <div style={S.memberStats}>
                     <div><span style={S.mLabel}>残高</span><span style={{color: bal.balance >= 0 ? '#10b981' : '#dc2626', fontWeight: 700}}>¥{(bal.balance/1000).toFixed(0)}千</span></div>
                     <div><span style={S.mLabel}>受取</span><span>{receives.length}回</span></div>
                     <div><span style={S.mLabel}>未払</span><span style={{color: bal.unpaidMonths.length ? '#dc2626' : '#10b981'}}>{bal.unpaidMonths.length}ヶ月</span></div>
                   </div>
+                  {/* 口座情報（管理者のみ） */}
+                  {isAdmin && (
+                    <div style={{marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0'}}>
+                      {hasBank ? (
+                        <div style={{background: '#f0f9ff', padding: '10px 12px', borderRadius: 8, fontSize: 12, color: '#0369a1'}}>
+                          <div style={{fontWeight: 600, marginBottom: 4}}>🏦 振込先</div>
+                          <div>{m.bankName} {m.branchName}</div>
+                          <div>{m.accountType} {m.accountNumber}</div>
+                          <div>{m.accountHolder}</div>
+                        </div>
+                      ) : (
+                        <div style={{background: '#fef3c7', padding: '8px 12px', borderRadius: 8, fontSize: 12, color: '#92400e'}}>
+                          ⚠️ 口座未登録 - 編集ボタンから登録してください
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1253,7 +1296,28 @@ function MoaiManager() {
               <h4 style={S.subTitle}>未受取 ({getMembersNotReceived().length}名)</h4>
               {getMembersNotReceived().map(m => {
                 const calc = calculateReceiveAmount(m.id);
-                return <div key={m.id} style={S.notRecItem}><span>{m.name}</span><span style={{color: '#8b5cf6'}}>¥{(calc.finalAmount/1000).toFixed(0)}千</span></div>;
+                const hasBank = m.bankName && m.accountNumber;
+                return (
+                  <div key={m.id} style={{...S.notRecItem, flexDirection: 'column', alignItems: 'stretch', gap: 8}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                      <span style={{fontWeight: 600}}>{m.name}</span>
+                      <span style={{color: '#8b5cf6', fontWeight: 700}}>¥{(calc.finalAmount/1000).toFixed(0)}千</span>
+                    </div>
+                    {isAdmin && hasBank && (
+                      <div style={{background: '#f0f9ff', padding: '10px 12px', borderRadius: 8, fontSize: 12, color: '#0369a1'}}>
+                        <div style={{fontWeight: 600, marginBottom: 4}}>🏦 振込先</div>
+                        <div>{m.bankName} {m.branchName}</div>
+                        <div>{m.accountType} {m.accountNumber}</div>
+                        <div>{m.accountHolder}</div>
+                      </div>
+                    )}
+                    {isAdmin && !hasBank && (
+                      <div style={{background: '#fef3c7', padding: '8px 12px', borderRadius: 8, fontSize: 12, color: '#92400e'}}>
+                        ⚠️ 口座未登録
+                      </div>
+                    )}
+                  </div>
+                );
               })}
             </div>
             <div style={S.card}>
@@ -1416,6 +1480,7 @@ function MoaiManager() {
           {showModal === 'editMember' && <MemberForm member={editingMember} onSubmit={handleEditMember} onCancel={() => { setShowModal(null); setEditingMember(null); }} />}
           {showModal === 'balance' && <BalanceForm onSubmit={handleBalanceRecord} onCancel={() => setShowModal(null)} />}
           {showModal === 'createEvent' && <EventForm nextDate={getNextPartyDate()} onSubmit={handleCreateEvent} onCancel={() => setShowModal(null)} />}
+          {showModal === 'editEvent' && editingEvent && <EventForm event={editingEvent} onSubmit={(data) => handleEditEvent(editingEvent.id, data)} onCancel={() => { setShowModal(null); setEditingEvent(null); }} />}
           {showModal === 'expense' && editingEvent && <ExpenseForm event={editingEvent} members={selectedGroup.members} onSubmit={(data) => handleRecordExpense(editingEvent.id, data)} onCancel={() => { setShowModal(null); setEditingEvent(null); }} />}
           {showModal === 'settings' && <SettingsForm group={selectedGroup} onSubmit={handleUpdateGroup} onChangePassword={handleChangePassword} onCancel={() => setShowModal(null)} />}
           {showModal === 'export' && <ExportForm group={selectedGroup} getMonthList={getMonthList} getMemberPaymentForMonth={getMemberPaymentForMonth} getMemberBalance={getMemberBalance} onCancel={() => setShowModal(null)} />}
@@ -1633,19 +1698,37 @@ function ReceiveRequestForm({ group, notReceived, onSubmit, onCancel }) {
 
 function MemberForm({ member, onSubmit, onCancel }) {
   const [name, setName] = React.useState(member?.name || '');
-  const [phone, setPhone] = React.useState(member?.phone || '');
+  const [bankName, setBankName] = React.useState(member?.bankName || '');
+  const [branchName, setBranchName] = React.useState(member?.branchName || '');
+  const [accountType, setAccountType] = React.useState(member?.accountType || '普通');
+  const [accountNumber, setAccountNumber] = React.useState(member?.accountNumber || '');
+  const [accountHolder, setAccountHolder] = React.useState(member?.accountHolder || '');
   const [carryOver, setCarryOver] = React.useState((member?.carryOver || 0) / 1000);
   const [memo, setMemo] = React.useState(member?.memo || '');
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>{member ? '✎ 編集' : '+ 追加'}</h3>
-      <input type="text" value={name} onChange={e => setName(e.target.value)} style={S.input} placeholder="名前" />
-      <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} style={S.input} placeholder="電話番号" />
-      <input type="number" value={carryOver} onChange={e => setCarryOver(+e.target.value)} style={S.input} placeholder="繰越(千円)" />
-      <input type="text" value={memo} onChange={e => setMemo(e.target.value)} style={S.input} placeholder="メモ（例：来月不参加）" />
+      <input type="text" value={name} onChange={e => setName(e.target.value)} style={S.input} placeholder="名前 *" />
+      
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, marginTop: 8}}>
+        <div style={{fontSize: 13, fontWeight: 600, color: '#334155', marginBottom: 10}}>🏦 振込口座</div>
+        <input type="text" value={bankName} onChange={e => setBankName(e.target.value)} style={{...S.input, marginBottom: 8}} placeholder="銀行名（例: 琉球銀行）" />
+        <input type="text" value={branchName} onChange={e => setBranchName(e.target.value)} style={{...S.input, marginBottom: 8}} placeholder="支店名（例: 那覇支店）" />
+        <div style={{display: 'flex', gap: 8, marginBottom: 8}}>
+          <select value={accountType} onChange={e => setAccountType(e.target.value)} style={{...S.input, flex: 1}}>
+            <option value="普通">普通</option>
+            <option value="当座">当座</option>
+          </select>
+          <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} style={{...S.input, flex: 2}} placeholder="口座番号" />
+        </div>
+        <input type="text" value={accountHolder} onChange={e => setAccountHolder(e.target.value)} style={S.input} placeholder="口座名義（カナ）" />
+      </div>
+      
+      <input type="number" value={carryOver} onChange={e => setCarryOver(+e.target.value)} style={{...S.input, marginTop: 8}} placeholder="繰越(千円)" />
+      <input type="text" value={memo} onChange={e => setMemo(e.target.value)} style={S.input} placeholder="メモ" />
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
-        <button style={S.submitBtn} onClick={() => onSubmit({ name, phone, carryOver, memo })} disabled={!name}>{member ? '更新' : '追加'}</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ name, bankName, branchName, accountType, accountNumber, accountHolder, carryOver, memo })} disabled={!name}>{member ? '更新' : '追加'}</button>
       </div>
     </div>
   );
@@ -1667,21 +1750,24 @@ function BalanceForm({ onSubmit, onCancel }) {
   );
 }
 
-function EventForm({ nextDate, onSubmit, onCancel }) {
-  const [date, setDate] = React.useState(nextDate || '');
-  const [time, setTime] = React.useState('19:00');
-  const [deadline, setDeadline] = React.useState('');
+function EventForm({ event, nextDate, onSubmit, onCancel }) {
+  const [date, setDate] = React.useState(event?.date || nextDate || '');
+  const [time, setTime] = React.useState(event?.time || '19:00');
+  const [deadline, setDeadline] = React.useState(event?.deadline || '');
+  const isEdit = !!event;
   return (
     <div style={S.form}>
-      <h3 style={S.formTitle}>🍻 飲み会作成</h3>
-      {nextDate && <div style={S.hint}>💡 提案日: {nextDate}</div>}
+      <h3 style={S.formTitle}>{isEdit ? '✎ 飲み会編集' : '🍻 飲み会作成'}</h3>
+      {!isEdit && nextDate && <div style={S.hint}>💡 提案日: {nextDate}</div>}
+      <label style={S.label}>開催日</label>
       <input type="date" value={date} onChange={e => setDate(e.target.value)} style={S.input} />
+      <label style={S.label}>開始時間</label>
       <input type="time" value={time} onChange={e => setTime(e.target.value)} style={S.input} />
       <label style={S.label}>投票締切日（任意）</label>
       <input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} style={S.input} />
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
-        <button style={S.submitBtn} onClick={() => onSubmit({ date, time, deadline, month: date?.slice(5, 7) })} disabled={!date}>作成</button>
+        <button style={S.submitBtn} onClick={() => onSubmit({ date, time, deadline, month: date?.slice(5, 7) })} disabled={!date}>{isEdit ? '更新' : '作成'}</button>
       </div>
     </div>
   );
@@ -2597,7 +2683,7 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
   );
 }
 
-function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
+function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onEditEvent, onDeleteEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
   const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
   const [showAddVenue, setShowAddVenue] = React.useState(false);
   const [showPastVenues, setShowPastVenues] = React.useState(false);
@@ -2609,13 +2695,13 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
       <div style={S.view}>
         <div style={S.viewHeader}>
           <h3 style={S.viewTitle}>🍻 飲み会</h3>
-          {isAdmin && <button style={S.addBtn} onClick={onCreateEvent}>+</button>}
+          <button style={S.addBtn} onClick={onCreateEvent}>+</button>
         </div>
         <div style={S.emptyParty}>
           <div style={{fontSize: 56}}>🍺</div>
           <p style={{fontSize: 16}}>予定なし</p>
           {getNextPartyDate() && <p style={{...S.hint, fontSize: 14}}>💡 次回提案: {getNextPartyDate()}</p>}
-          {isAdmin && <button style={S.createBtn} onClick={onCreateEvent}>飲み会を作成</button>}
+          <button style={S.createBtn} onClick={onCreateEvent}>飲み会を作成</button>
         </div>
         {pastEvents.length > 0 && (
           <div style={S.card}>
@@ -2656,7 +2742,15 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
     <div style={S.view}>
       <div style={S.viewHeader}>
         <h3 style={S.viewTitle}>🍻 {currentEvent.date}</h3>
-        {currentEvent.status === 'confirmed' && <span style={S.confirmedTag}>✓確定</span>}
+        <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+          {currentEvent.status === 'confirmed' && <span style={S.confirmedTag}>✓確定</span>}
+          {currentEvent.status !== 'completed' && (
+            <>
+              <button style={{...S.editBtn, fontSize: 16}} onClick={() => onEditEvent(currentEvent)}>✎</button>
+              <button style={{...S.delBtn, fontSize: 16}} onClick={() => onDeleteEvent(currentEvent.id)}>×</button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 基本情報 */}
@@ -2735,43 +2829,40 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             );
           })}
 
-          {isAdmin && (
-            <>
-              {showPastVenues ? (
-                <div style={S.pastVenuesBox}>
-                  <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 過去の店舗</div>
-                  {(group.pastVenues || []).length === 0 ? <div style={S.empty}>履歴なし</div> : (group.pastVenues || []).map(v => (
-                    <div key={v.id} style={S.pastVenueItem} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
-                      <span style={{fontSize: 14}}>{v.name}</span>
-                      <span style={{fontSize: 12, color: '#64748b'}}>{v.usedCount}回利用</span>
-                    </div>
-                  ))}
-                  <button style={S.linkBtn} onClick={() => setShowPastVenues(false)}>閉じる</button>
+          {/* 店舗追加（誰でもOK） */}
+          {showPastVenues ? (
+            <div style={S.pastVenuesBox}>
+              <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 過去の店舗</div>
+              {(group.pastVenues || []).length === 0 ? <div style={S.empty}>履歴なし</div> : (group.pastVenues || []).map(v => (
+                <div key={v.id} style={S.pastVenueItem} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
+                  <span style={{fontSize: 14}}>{v.name}</span>
+                  <span style={{fontSize: 12, color: '#64748b'}}>{v.usedCount}回利用</span>
                 </div>
-              ) : showAddVenue ? (
-                <div style={S.addVenueForm}>
-                  <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
-                  <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
-                  <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL" />
-                  <input type="text" value={newVenue.budget} onChange={e => setNewVenue({...newVenue, budget: e.target.value})} style={S.input} placeholder="予算" />
-                  <div style={S.btnRow}>
-                    <button style={S.cancelBtn} onClick={() => setShowAddVenue(false)}>キャンセル</button>
-                    <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '', budget: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={S.addVenueBtns}>
-                  <button style={S.addVenueBtn} onClick={() => setShowAddVenue(true)}>+ 新規追加</button>
-                  <button style={S.pastVenueBtn} onClick={() => setShowPastVenues(true)}>🏮 過去から選ぶ</button>
-                </div>
-              )}
-            </>
+              ))}
+              <button style={S.linkBtn} onClick={() => setShowPastVenues(false)}>閉じる</button>
+            </div>
+          ) : showAddVenue ? (
+            <div style={S.addVenueForm}>
+              <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
+              <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
+              <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL" />
+              <input type="text" value={newVenue.budget} onChange={e => setNewVenue({...newVenue, budget: e.target.value})} style={S.input} placeholder="予算" />
+              <div style={S.btnRow}>
+                <button style={S.cancelBtn} onClick={() => setShowAddVenue(false)}>キャンセル</button>
+                <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '', budget: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
+              </div>
+            </div>
+          ) : (
+            <div style={S.addVenueBtns}>
+              <button style={S.addVenueBtn} onClick={() => setShowAddVenue(true)}>+ 新規追加</button>
+              <button style={S.pastVenueBtn} onClick={() => setShowPastVenues(true)}>🏮 過去から選ぶ</button>
+            </div>
           )}
         </div>
       )}
 
       {/* 確定ボタン */}
-      {isAdmin && currentEvent.status === 'voting' && currentEvent.venues.length > 0 && (
+      {currentEvent.status === 'voting' && currentEvent.venues.length > 0 && (
         <div style={S.card}>
           <h4 style={S.subTitle}>📢 予約確定</h4>
           {currentEvent.venues.map(v => (
@@ -2831,12 +2922,10 @@ ${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n`
                 <a key={p.id} href={p.url} target="_blank" rel="noreferrer" style={S.photoLink}>🖼</a>
               ))}
             </div>
-            {isAdmin && (
-              <div style={S.addPhotoRow}>
-                <input type="text" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{...S.input, flex: 1}} placeholder="写真URL" />
-                <button style={S.addPhotoBtn} onClick={() => { onAddPhoto(currentEvent.id, photoUrl); setPhotoUrl(''); }} disabled={!photoUrl}>追加</button>
-              </div>
-            )}
+            <div style={S.addPhotoRow}>
+              <input type="text" value={photoUrl} onChange={e => setPhotoUrl(e.target.value)} style={{...S.input, flex: 1}} placeholder="写真URL" />
+              <button style={S.addPhotoBtn} onClick={() => { onAddPhoto(currentEvent.id, photoUrl); setPhotoUrl(''); }} disabled={!photoUrl}>追加</button>
+            </div>
           </div>
 
           {/* 完了ボタン */}
