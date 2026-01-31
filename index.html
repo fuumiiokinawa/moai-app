@@ -141,6 +141,7 @@ function MoaiManager() {
   const [lastConfirmedEvent, setLastConfirmedEvent] = React.useState(null); // イベント確定通知用
   const [lastReceiveInfo, setLastReceiveInfo] = React.useState(null); // 受取通知用
   const [lastCreatedParty, setLastCreatedParty] = React.useState(null); // 飲み会作成通知用
+  const [showDelinquentDetail, setShowDelinquentDetail] = React.useState(false); // 滞納アラート展開
 
   // プリセットデータ
   const createPresetData = () => ({
@@ -424,9 +425,13 @@ function MoaiManager() {
 
   const getMemberPaymentForMonth = (memberId, month) => {
     const payment = getActivePayments().find(p => p.memberId === memberId && p.month === month);
-    if (payment) return { status: 'paid', date: payment.recordedAt?.slice(5, 10).replace('-', '/') };
-    const receive = getActiveReceives().find(r => r.month === month && r.winnerId === memberId);
-    if (receive) return { status: 'offset' };
+    if (payment) {
+      // 相殺入金かどうかを判別
+      if (payment.isOffset) {
+        return { status: 'offset', date: payment.recordedAt?.slice(5, 10).replace('-', '/') };
+      }
+      return { status: 'paid', date: payment.recordedAt?.slice(5, 10).replace('-', '/') };
+    }
     return { status: 'unpaid' };
   };
 
@@ -574,10 +579,36 @@ function MoaiManager() {
     // 相殺情報を計算（受取前に計算する必要がある）
     const calc = calculateReceiveAmount(data.winnerId);
     
-    let updated = { ...selectedGroup, receives: [...selectedGroup.receives, { id: `rec-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }] };
+    // 未払い月を特定して相殺入金を記録
+    const monthList = getMonthList();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const unpaidMonths = monthList.filter(m => {
+      if (m > currentMonth) return false; // 未来の月は除外
+      const info = getMemberPaymentForMonth(data.winnerId, m);
+      return info.status === 'unpaid';
+    });
+    
+    // 相殺入金を作成
+    const offsetPayments = unpaidMonths.map((month, idx) => ({
+      id: `pay-offset-${Date.now()}-${idx}`,
+      memberId: data.winnerId,
+      month: month,
+      amount: selectedGroup.monthlyAmount,
+      savings: selectedGroup.savingsAmount,
+      status: 'active',
+      isOffset: true, // 相殺フラグ
+      receiveId: `rec-${Date.now()}`, // 紐付く受取ID
+      recordedAt: new Date().toISOString()
+    }));
+    
+    let updated = { 
+      ...selectedGroup, 
+      receives: [...selectedGroup.receives, { id: `rec-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }],
+      payments: [...selectedGroup.payments, ...offsetPayments] // 相殺入金を追加
+    };
     // 受取希望があれば削除
     updated.receiveRequests = (updated.receiveRequests || []).filter(r => r.memberId !== data.winnerId);
-    updated = addLog('受取', `¥${data.amount.toLocaleString()}`, updated);
+    updated = addLog('受取', `¥${data.amount.toLocaleString()}${offsetPayments.length > 0 ? `（${offsetPayments.length}ヶ月分相殺）` : ''}`, updated);
     updateGroup(updated);
     notify('受取を記録しました');
     
@@ -590,7 +621,8 @@ function MoaiManager() {
         month: data.month,
         baseAmount: calc.baseAmount,
         offsetAmount: calc.offsetAmount,
-        finalAmount: calc.finalAmount
+        finalAmount: calc.finalAmount,
+        offsetMonths: unpaidMonths // 相殺した月も渡す
       });
       setShowModal('receiveNotify');
     } else {
@@ -1086,52 +1118,68 @@ function MoaiManager() {
               <div style={{...S.stat, background: getTotalUnpaid() > 0 ? '#fef2f2' : '#ecfdf5'}}><div style={S.statLabel}>未払計</div><div style={{...S.statVal, color: getTotalUnpaid() > 0 ? '#dc2626' : '#10b981'}}>¥{(getTotalUnpaid()/1000).toFixed(0)}千</div></div>
             </div>
 
-            {/* 未払いアラート */}
+            {/* 未払いアラート（アコーディオン） */}
             {(() => {
               const delinquents = getDelinquentMembers();
               if (delinquents.length > 0) {
                 const serious = delinquents.filter(d => d.unpaidMonths >= 2);
                 const totalAmount = delinquents.reduce((sum, d) => sum + d.unpaidAmount, 0);
                 return (
-                  <div style={{background: serious.length > 0 ? '#fef2f2' : '#fffbeb', border: `2px solid ${serious.length > 0 ? '#fecaca' : '#fde68a'}`, borderRadius: 14, padding: 16}}>
-                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+                  <div style={{background: serious.length > 0 ? '#fef2f2' : '#fffbeb', border: `2px solid ${serious.length > 0 ? '#fecaca' : '#fde68a'}`, borderRadius: 14, overflow: 'hidden'}}>
+                    <button 
+                      onClick={() => setShowDelinquentDetail(!showDelinquentDetail)}
+                      style={{
+                        width: '100%',
+                        padding: 16,
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
                       <h4 style={{color: serious.length > 0 ? '#dc2626' : '#d97706', fontSize: 15, fontWeight: 700, margin: 0}}>
                         {serious.length > 0 ? '⚠️ 滞納アラート' : '📋 未払い状況'}
                       </h4>
-                      <span style={{background: serious.length > 0 ? '#dc2626' : '#f59e0b', color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600}}>
-                        {delinquents.length}名 / ¥{(totalAmount/1000).toFixed(0)}千
-                      </span>
-                    </div>
-                    {delinquents.slice(0, 3).map(m => (
-                      <div key={m.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #fecaca'}}>
-                        <span style={{fontWeight: 600}}>{m.name}</span>
-                        <div style={{textAlign: 'right'}}>
-                          <div style={{color: m.unpaidMonths >= 2 ? '#dc2626' : '#d97706', fontWeight: 700}}>{m.unpaidMonths}ヶ月</div>
-                          <div style={{fontSize: 12, color: '#64748b'}}>¥{m.unpaidAmount.toLocaleString()}</div>
-                        </div>
+                      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                        <span style={{background: serious.length > 0 ? '#dc2626' : '#f59e0b', color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600}}>
+                          {delinquents.length}名 / ¥{(totalAmount/1000).toFixed(0)}千
+                        </span>
+                        <span style={{fontSize: 12, color: '#64748b'}}>{showDelinquentDetail ? '▲' : '▼'}</span>
                       </div>
-                    ))}
-                    {delinquents.length > 3 && (
-                      <div style={{fontSize: 12, color: '#64748b', padding: '8px 0'}}>...他 {delinquents.length - 3}名</div>
-                    )}
-                    {isAdmin && (
-                      <button 
-                        style={{
-                          width: '100%',
-                          marginTop: 12,
-                          padding: '12px',
-                          background: '#06c755',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: 10,
-                          fontSize: 14,
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }} 
-                        onClick={() => setShowModal('reminderLine')}
-                      >
-                        📱 LINE催促メッセージを作成
-                      </button>
+                    </button>
+                    {showDelinquentDetail && (
+                      <div style={{padding: '0 16px 16px'}}>
+                        {delinquents.map(m => (
+                          <div key={m.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #fecaca'}}>
+                            <span style={{fontWeight: 600}}>{m.name}</span>
+                            <div style={{textAlign: 'right'}}>
+                              <div style={{color: m.unpaidMonths >= 2 ? '#dc2626' : '#d97706', fontWeight: 700}}>{m.unpaidMonths}ヶ月</div>
+                              <div style={{fontSize: 12, color: '#64748b'}}>¥{m.unpaidAmount.toLocaleString()}</div>
+                            </div>
+                          </div>
+                        ))}
+                        {isAdmin && (
+                          <button 
+                            style={{
+                              width: '100%',
+                              marginTop: 12,
+                              padding: '12px',
+                              background: '#06c755',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 10,
+                              fontSize: 14,
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }} 
+                            onClick={() => setShowModal('reminderLine')}
+                          >
+                            📱 LINE催促メッセージを作成
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
@@ -4485,29 +4533,41 @@ ${appUrl}`;
           {showPastVenues ? (
             <div style={S.pastVenuesBox}>
               <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 候補店舗リスト</div>
-              <div style={{fontSize: 12, color: '#64748b', marginBottom: 10}}>タップして今回の候補に追加</div>
-              {(group.pastVenues || []).length === 0 ? <div style={S.empty}>店舗登録なし</div> : (group.pastVenues || []).map(v => (
-                <div key={v.id} style={{...S.pastVenueItem, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                  <div style={{flex: 1, cursor: 'pointer'}} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
-                    <div style={{fontSize: 14, fontWeight: 500}}>{v.name}</div>
-                    <div style={{fontSize: 11, color: '#64748b'}}>{v.usedCount > 0 ? `${v.usedCount}回利用` : '未利用'}</div>
-                  </div>
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); onDeletePastVenue(v.id); }}
-                    style={{
-                      padding: '4px 8px',
-                      background: '#fee2e2',
-                      color: '#dc2626',
-                      border: 'none',
-                      borderRadius: 4,
-                      fontSize: 12,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    削除
-                  </button>
-                </div>
-              ))}
+              <div style={{fontSize: 12, color: '#64748b', marginBottom: 10}}>タップして今回の候補に追加（利用回数順）</div>
+              {(group.pastVenues || []).length === 0 ? <div style={S.empty}>店舗登録なし</div> : 
+                [...(group.pastVenues || [])].sort((a, b) => (b.usedCount || 0) - (a.usedCount || 0)).map((v, idx) => {
+                  const rank = idx + 1;
+                  const rankIcon = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `${rank}.`;
+                  const hasUsed = (v.usedCount || 0) > 0;
+                  return (
+                    <div key={v.id} style={{...S.pastVenueItem, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: hasUsed ? '#f0fdf4' : '#f8fafc'}}>
+                      <div style={{flex: 1, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10}} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
+                        <span style={{fontSize: rank <= 3 ? 18 : 14, minWidth: 28}}>{rankIcon}</span>
+                        <div>
+                          <div style={{fontSize: 14, fontWeight: 500}}>{v.name}</div>
+                          <div style={{fontSize: 11, color: hasUsed ? '#10b981' : '#64748b'}}>
+                            {hasUsed ? `✅ ${v.usedCount}回利用` : '未利用'}
+                          </div>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onDeletePastVenue(v.id); }}
+                        style={{
+                          padding: '4px 8px',
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: 12,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  );
+                })
+              }
               <button style={S.linkBtn} onClick={() => setShowPastVenues(false)}>閉じる</button>
             </div>
           ) : showAddVenue ? (
