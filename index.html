@@ -3209,65 +3209,66 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
                     🔍 那覇 居酒屋
                   </button>
                 </div>
-                <div style={{fontSize: 11, color: '#64748b', marginTop: 6, textAlign: 'center'}}>
-                  検索後、下のフォームに情報を入力してください
-                </div>
               </div>
 
-              {/* URL貼り付けで自動入力 */}
-              <div style={{background: '#f0f9ff', padding: 12, borderRadius: 10, marginBottom: 12}}>
-                <div style={{fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 8}}>📋 URLから自動入力</div>
+              {/* かんたん登録：URL貼り付けで即追加 */}
+              <div style={{background: '#ecfdf5', padding: 14, borderRadius: 12, marginBottom: 16, border: '2px solid #10b981'}}>
+                <div style={{fontSize: 13, fontWeight: 700, color: '#065f46', marginBottom: 8}}>⚡ かんたん登録</div>
+                <div style={{fontSize: 11, color: '#047857', marginBottom: 8}}>Google Maps のURLを貼り付けるだけ！</div>
                 <input 
                   type="text" 
-                  style={{...S.input, marginBottom: 8}} 
-                  placeholder="Google Maps や 食べログのURLを貼り付け"
-                  onChange={(e) => {
-                    const url = e.target.value;
-                    if (!url) return;
-                    
-                    // Google Maps URL から店名を抽出
-                    let extractedName = '';
-                    let extractedUrl = url;
-                    
-                    try {
-                      if (url.includes('google.com/maps/place/')) {
-                        const match = url.match(/place\/([^\/]+)/);
-                        if (match) {
-                          extractedName = decodeURIComponent(match[1].replace(/\+/g, ' '));
+                  style={{...S.input, marginBottom: 0, fontSize: 14}} 
+                  placeholder="URLを貼り付けて Enter"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const url = e.target.value;
+                      if (!url) return;
+                      
+                      let name = '';
+                      try {
+                        if (url.includes('google.com/maps/place/')) {
+                          const match = url.match(/place\/([^\/]+)/);
+                          if (match) {
+                            name = decodeURIComponent(match[1].replace(/\+/g, ' '));
+                          }
                         }
-                      } else if (url.includes('tabelog.com')) {
-                        extractedUrl = url;
-                      } else if (url.includes('hotpepper.jp')) {
-                        extractedUrl = url;
+                      } catch (err) {}
+                      
+                      if (!name) {
+                        name = prompt('店舗名を入力してください', '');
                       }
                       
-                      setNewVenue(prev => ({
-                        ...prev,
-                        name: extractedName || prev.name,
-                        url: extractedUrl
-                      }));
-                      
-                      if (extractedName) {
-                        notify('店舗名を自動入力しました');
+                      if (name) {
+                        onAddVenue(currentEvent.id, { name: name, url: url, address: '' });
+                        e.target.value = '';
+                        notify('店舗を追加しました！');
                       }
-                    } catch (err) {
-                      console.error(err);
                     }
                   }}
                 />
-                <div style={{fontSize: 10, color: '#64748b'}}>
-                  対応: Google Maps / 食べログ / ホットペッパー
-                </div>
               </div>
 
-              {/* 手動入力フォーム */}
-              <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
-              <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
-              <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL（お店のページ）" />
-              <div style={S.btnRow}>
-                <button style={S.cancelBtn} onClick={() => setShowAddVenue(false)}>キャンセル</button>
-                <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
-              </div>
+              {/* 詳細入力（折りたたみ） */}
+              <details style={{marginBottom: 12}}>
+                <summary style={{fontSize: 13, color: '#64748b', cursor: 'pointer', marginBottom: 10}}>📝 手動で詳しく入力する</summary>
+                <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
+                <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
+                <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL" />
+                <button 
+                  style={{...S.submitBtn, width: '100%', marginTop: 8}} 
+                  onClick={() => { 
+                    if (newVenue.name) {
+                      onAddVenue(currentEvent.id, newVenue); 
+                      setNewVenue({ name: '', address: '', url: '' }); 
+                    }
+                  }} 
+                  disabled={!newVenue.name}
+                >
+                  追加
+                </button>
+              </details>
+
+              <button style={{...S.cancelBtn, width: '100%'}} onClick={() => setShowAddVenue(false)}>閉じる</button>
             </div>
           ) : (
             <div style={S.addVenueBtns}>
