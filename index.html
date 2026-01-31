@@ -2827,6 +2827,7 @@ function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDelete
   const [editingEvent, setEditingEvent] = React.useState(null);
   const [newEvent, setNewEvent] = React.useState({ title: '', description: '', date: '', deadline: '', type: 'travel' });
   const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
+  const [expandedPastEvent, setExpandedPastEvent] = React.useState(null);
 
   const eventTypes = [
     { value: 'travel', label: '🚗 旅行', color: '#0ea5e9' },
@@ -3077,29 +3078,84 @@ ${appUrl}`;
             const typeInfo = getTypeInfo(event.type);
             const att = event.attendance || {};
             const yesCount = Object.values(att).filter(v => v === 'yes').length;
+            const maybeCount = Object.values(att).filter(v => v === 'maybe').length;
+            const noCount = Object.values(att).filter(v => v === 'no').length;
+            const isExpanded = expandedPastEvent === event.id;
+            
             return (
-              <div key={event.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f1f5f9'}}>
-                <div>
-                  <span style={{fontSize: 12, marginRight: 8}}>{typeInfo.label.split(' ')[0]}</span>
-                  <span style={{fontWeight: 500}}>{event.title}</span>
+              <div key={event.id} style={{borderBottom: '1px solid #f1f5f9'}}>
+                {/* ヘッダー（タップで展開） */}
+                <div 
+                  style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', cursor: 'pointer'}}
+                  onClick={() => setExpandedPastEvent(isExpanded ? null : event.id)}
+                >
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <span style={{fontSize: 12}}>{typeInfo.label.split(' ')[0]}</span>
+                    <span style={{fontWeight: 500}}>{event.title}</span>
+                    <span style={{fontSize: 16, color: '#94a3b8', transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)'}}></span>
+                  </div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                    <span style={{fontSize: 13, color: '#10b981'}}>⭕{yesCount}</span>
+                  </div>
                 </div>
-                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
-                  <span style={{fontSize: 13, color: '#64748b'}}>{yesCount}名参加</span>
-                  <button
-                    onClick={() => onReopen(event.id)}
-                    style={{
-                      padding: '4px 10px',
-                      background: '#f0f9ff',
-                      color: '#0369a1',
-                      border: '1px solid #0ea5e9',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    🔓 再開
-                  </button>
-                </div>
+                
+                {/* 展開時の詳細 */}
+                {isExpanded && (
+                  <div style={{padding: '0 0 16px 0'}}>
+                    {/* 日程・詳細 */}
+                    <div style={{background: '#f8fafc', borderRadius: 10, padding: 12, marginBottom: 12}}>
+                      {event.date && <div style={{fontSize: 13, color: '#64748b', marginBottom: 4}}>📅 {event.date}</div>}
+                      {event.description && <div style={{fontSize: 13, color: '#475569', whiteSpace: 'pre-wrap'}}>{event.description}</div>}
+                      {!event.date && !event.description && <div style={{fontSize: 13, color: '#94a3b8'}}>詳細なし</div>}
+                    </div>
+                    
+                    {/* 投票結果 */}
+                    <div style={{marginBottom: 12}}>
+                      <div style={{display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#e2e8f0', marginBottom: 8}}>
+                        <div style={{background: '#10b981', width: `${(yesCount / group.members.length) * 100}%`}}></div>
+                        <div style={{background: '#f59e0b', width: `${(maybeCount / group.members.length) * 100}%`}}></div>
+                        <div style={{background: '#ef4444', width: `${(noCount / group.members.length) * 100}%`}}></div>
+                      </div>
+                      <div style={{fontSize: 13}}>
+                        <div style={{marginBottom: 4}}>
+                          <span style={{color: '#10b981', fontWeight: 600}}>⭕ 参加 ({yesCount}): </span>
+                          <span style={{color: '#64748b'}}>
+                            {Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                          </span>
+                        </div>
+                        <div style={{marginBottom: 4}}>
+                          <span style={{color: '#f59e0b', fontWeight: 600}}>🔺 未定 ({maybeCount}): </span>
+                          <span style={{color: '#64748b'}}>
+                            {Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                          </span>
+                        </div>
+                        <div>
+                          <span style={{color: '#ef4444', fontWeight: 600}}>❌ 不参加 ({noCount}): </span>
+                          <span style={{color: '#64748b'}}>
+                            {Object.entries(att).filter(([_, v]) => v === 'no').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* 再開ボタン */}
+                    <button
+                      onClick={() => onReopen(event.id)}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        background: '#f0f9ff',
+                        color: '#0369a1',
+                        border: '1px solid #0ea5e9',
+                        borderRadius: 8,
+                        fontSize: 13,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      🔓 投票を再開する
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
