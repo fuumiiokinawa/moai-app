@@ -139,6 +139,7 @@ function MoaiManager() {
   const [lastPaidInfo, setLastPaidInfo] = React.useState(null); // 入金お礼用
   const [lastConfirmedParty, setLastConfirmedParty] = React.useState(null); // 飲み会確定通知用
   const [lastConfirmedEvent, setLastConfirmedEvent] = React.useState(null); // イベント確定通知用
+  const [lastReceiveInfo, setLastReceiveInfo] = React.useState(null); // 受取通知用
 
   // プリセットデータ
   const createPresetData = () => ({
@@ -567,13 +568,31 @@ function MoaiManager() {
   };
 
   const handleReceive = (data) => {
+    // 相殺情報を計算（受取前に計算する必要がある）
+    const calc = calculateReceiveAmount(data.winnerId);
+    
     let updated = { ...selectedGroup, receives: [...selectedGroup.receives, { id: `rec-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }] };
     // 受取希望があれば削除
     updated.receiveRequests = (updated.receiveRequests || []).filter(r => r.memberId !== data.winnerId);
     updated = addLog('受取', `¥${data.amount.toLocaleString()}`, updated);
     updateGroup(updated);
     notify('受取を記録しました');
-    setShowModal(null);
+    
+    // 受取通知モーダルを表示（相殺情報も含む）
+    const winner = selectedGroup.members.find(m => m.id === data.winnerId);
+    if (winner) {
+      setLastReceiveInfo({ 
+        member: winner, 
+        amount: data.amount, 
+        month: data.month,
+        baseAmount: calc.baseAmount,
+        offsetAmount: calc.offsetAmount,
+        finalAmount: calc.finalAmount
+      });
+      setShowModal('receiveNotify');
+    } else {
+      setShowModal(null);
+    }
   };
 
   // 入金取消（論理削除）
@@ -1065,23 +1084,25 @@ function MoaiManager() {
                     {delinquents.length > 3 && (
                       <div style={{fontSize: 12, color: '#64748b', padding: '8px 0'}}>...他 {delinquents.length - 3}名</div>
                     )}
-                    <button 
-                      style={{
-                        width: '100%',
-                        marginTop: 12,
-                        padding: '12px',
-                        background: '#06c755',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 10,
-                        fontSize: 14,
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }} 
-                      onClick={() => setShowModal('reminderLine')}
-                    >
-                      📱 LINE催促メッセージを作成
-                    </button>
+                    {isAdmin && (
+                      <button 
+                        style={{
+                          width: '100%',
+                          marginTop: 12,
+                          padding: '12px',
+                          background: '#06c755',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 10,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }} 
+                        onClick={() => setShowModal('reminderLine')}
+                      >
+                        📱 LINE催促メッセージを作成
+                      </button>
+                    )}
                   </div>
                 );
               }
@@ -1751,6 +1772,7 @@ function MoaiManager() {
           {showModal === 'paymentThanks' && lastPaidInfo && <PaymentThanksModal group={selectedGroup} paidMembers={lastPaidInfo.members} month={lastPaidInfo.month} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'partyConfirmed' && lastConfirmedParty && <PartyConfirmedModal group={selectedGroup} event={lastConfirmedParty.event} venue={lastConfirmedParty.venue} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'eventConfirmed' && lastConfirmedEvent && <EventConfirmedModal group={selectedGroup} event={lastConfirmedEvent} onClose={() => setShowModal(null)} notify={notify} />}
+          {showModal === 'receiveNotify' && lastReceiveInfo && <ReceiveNotifyModal group={selectedGroup} member={lastReceiveInfo.member} amount={lastReceiveInfo.amount} month={lastReceiveInfo.month} baseAmount={lastReceiveInfo.baseAmount} offsetAmount={lastReceiveInfo.offsetAmount} finalAmount={lastReceiveInfo.finalAmount} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'reminderLine' && <DelinquentReminderModal group={selectedGroup} delinquents={getDelinquentMembers()} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'receiveOrder' && <ReceiveOrderModal group={selectedGroup} receiveOrder={getReceiveOrder()} onClose={() => setShowModal(null)} />}
         </Modal>
@@ -2634,6 +2656,106 @@ ${appUrl}`;
   );
 }
 
+// 受取通知メッセージ
+function ReceiveNotifyModal({ group, member, amount, month, baseAmount, offsetAmount, finalAmount, onClose, notify }) {
+  const monthDisplay = month.replace('-', '年') + '月';
+  const appUrl = window.location.href.split('?')[0] + '?view=receive';
+  
+  // 受取履歴から今回が何回目かを計算
+  const activeReceives = (group.receives || []).filter(r => r.status !== 'deleted');
+  const memberReceiveCount = activeReceives.filter(r => r.winnerId === member.id).length;
+  
+  // 全体の受取状況
+  const totalMembers = group.members.length;
+  const membersReceived = [...new Set(activeReceives.map(r => r.winnerId))].length;
+  
+  // 相殺がある場合のメッセージ
+  const hasOffset = offsetAmount && offsetAmount > 0;
+  const offsetMessage = hasOffset ? `
+⚠️ 未払い分相殺
+　　基本額: ¥${baseAmount?.toLocaleString() || amount.toLocaleString()}
+　　相殺額: −¥${offsetAmount.toLocaleString()}
+　　実受取: ¥${finalAmount?.toLocaleString() || amount.toLocaleString()}` : '';
+  
+  const message = `🎊 ${group.name} 受取のお知らせ 🎊
+
+━━━━━━━━━━━━━━━━
+📅 ${monthDisplay}
+🎯 受取者: ${member.name}さん
+💰 ${hasOffset ? '実受取額' : '金額'}: ¥${(finalAmount || amount).toLocaleString()}
+━━━━━━━━━━━━━━━━
+${offsetMessage}
+${member.name}さん、おめでとうございます！🎉
+
+📊 受取状況: ${membersReceived}/${totalMembers}名完了
+${memberReceiveCount > 1 ? `（${member.name}さんは${memberReceiveCount}回目）` : ''}
+
+次回の受取者もお楽しみに！🌸
+
+👇 詳細はこちら
+${appUrl}`;
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(message);
+    notify('コピーしました！');
+  };
+
+  const handleLineShare = () => {
+    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+  };
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>🎊 受取通知メッセージ</h3>
+      
+      <div style={{background: '#f0fdf4', padding: 12, borderRadius: 8, marginBottom: 12, border: '2px solid #bbf7d0'}}>
+        <div style={{fontWeight: 600, color: '#16a34a', marginBottom: 6}}>🎯 受取確定</div>
+        <div style={{fontSize: 15, fontWeight: 600}}>{member.name}さん</div>
+        <div style={{fontSize: 14, color: '#64748b', marginTop: 4}}>{monthDisplay}</div>
+        
+        {hasOffset ? (
+          <div style={{marginTop: 8, padding: 8, background: '#fef3c7', borderRadius: 6}}>
+            <div style={{fontSize: 12, color: '#92400e', marginBottom: 4}}>⚠️ 未払い分を相殺</div>
+            <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 13}}>
+              <span>基本額</span><span>¥{baseAmount?.toLocaleString()}</span>
+            </div>
+            <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#dc2626'}}>
+              <span>相殺</span><span>−¥{offsetAmount.toLocaleString()}</span>
+            </div>
+            <div style={{display: 'flex', justifyContent: 'space-between', fontSize: 14, fontWeight: 700, borderTop: '1px solid #fde68a', marginTop: 4, paddingTop: 4}}>
+              <span>実受取</span><span style={{color: '#16a34a'}}>¥{finalAmount?.toLocaleString()}</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{fontSize: 14, fontWeight: 600, color: '#16a34a', marginTop: 4}}>¥{amount.toLocaleString()}</div>
+        )}
+        
+        <div style={{fontSize: 13, color: '#64748b', marginTop: 8}}>
+          受取状況: {membersReceived}/{totalMembers}名完了
+        </div>
+      </div>
+      
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto'}}>
+        {message}
+      </div>
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
+        {group.lineGroupUrl ? (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleLineShare}>💬 LINEで送る</button>
+        ) : (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+        )}
+      </div>
+      {!group.lineGroupUrl && (
+        <div style={{fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8}}>
+          💡 設定でLINEグループURLを登録すると直接送れます
+        </div>
+      )}
+    </div>
+  );
+}
+
 // 滞納者催促メッセージ
 function DelinquentReminderModal({ group, delinquents, onClose, notify }) {
   const [messageType, setMessageType] = React.useState('all'); // 'all' or 'individual'
@@ -3054,6 +3176,10 @@ function HelpView({ isAdmin, group }) {
           <div style={styles.tableRow}><span style={styles.tableLabel}>抽選制</span><span style={styles.tableDesc}>未受取者からランダムに選出</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>希望優先</span><span style={styles.tableDesc}>受取希望を出した人を優先して抽選</span></div>
         </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>🎊 受取通知</div>
+          <p style={styles.p}>受取記録後に自動でお祝いメッセージ画面が表示され、LINEで送信できます。受取状況（何名完了か）も含まれます。</p>
+        </div>
       </Section>
       
       {/* 飲み会管理 */}
@@ -3419,8 +3545,8 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
     <div style={S.view}>
       <h3 style={S.viewTitle}>✅ 一括入金</h3>
       
-      {/* 滞納催促ボタン */}
-      {delinquents && delinquents.length > 0 && (
+      {/* 滞納催促ボタン（管理者のみ） */}
+      {isAdmin && delinquents && delinquents.length > 0 && (
         <div style={{background: '#fef2f2', border: '2px solid #fecaca', borderRadius: 12, padding: 14, marginBottom: 16}}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
             <span style={{fontWeight: 600, color: '#dc2626'}}>⚠️ 未払い: {delinquents.length}名</span>
