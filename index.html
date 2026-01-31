@@ -118,7 +118,15 @@
 
 
 function MoaiManager() {
-  const [currentView, setCurrentView] = React.useState('dashboard');
+  // URLパラメータから初期画面を取得
+  const getInitialView = () => {
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get('view');
+    const validViews = ['dashboard', 'party', 'events', 'members', 'bulk', 'receive', 'table', 'history', 'help'];
+    return validViews.includes(view) ? view : 'dashboard';
+  };
+  
+  const [currentView, setCurrentView] = React.useState(getInitialView());
   const [isAdmin, setIsAdmin] = React.useState(false);
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [groups, setGroups] = React.useState([]);
@@ -2963,6 +2971,7 @@ function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDelete
                   onClick={() => {
                     const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
                     const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+                    const appUrl = window.location.href.split('?')[0] + '?view=events';
                     const msg = `【${event.title}】出欠確認
 
 📅 ${event.date || '日程未定'}
@@ -2970,7 +2979,9 @@ ${event.description ? `\n${event.description}\n` : ''}
 ⭕ 参加 (${yes.length}名): ${yes.join('、') || 'なし'}
 🔺 未定 (${maybe.length}名): ${maybe.join('、') || 'なし'}
 
-まだの方は回答お願いします！`;
+まだの方は回答お願いします！
+👇 投票はこちら
+${appUrl}`;
                     navigator.clipboard?.writeText(msg);
                     notify('コピーしました！');
                   }}
@@ -3335,6 +3346,7 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             <button style={S.lineBtn} onClick={() => {
               const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
               const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+              const appUrl = window.location.href.split('?')[0] + '?view=party';
               const msg = `🌺 模合飲み会のお知らせ 🌺
 
 ━━━━━━━━━━━━━━━━
@@ -3342,7 +3354,6 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
 
 📍 店舗: ${confirmedVenue?.name || '未定'}
 ${confirmedVenue?.address ? `📮 住所: ${confirmedVenue.address}` : ''}
-${confirmedVenue?.budget ? `💰 予算: ${confirmedVenue.budget}` : ''}
 ${confirmedVenue?.url ? `🔗 詳細: ${confirmedVenue.url}` : ''}
 ━━━━━━━━━━━━━━━━
 
@@ -3350,7 +3361,10 @@ ${confirmedVenue?.url ? `🔗 詳細: ${confirmedVenue.url}` : ''}
 ${yes.join('、') || 'なし'}
 
 ${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n` : ''}
-よろしくお願いします！🍻`;
+よろしくお願いします！🍻
+
+👇 出欠回答はこちら
+${appUrl}`;
               navigator.clipboard?.writeText(msg);
               notify('コピーしました！');
             }}>📋 LINEメッセージをコピー</button>
