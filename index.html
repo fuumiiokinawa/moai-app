@@ -795,6 +795,61 @@ function MoaiManager() {
   const getCurrentEvent = () => (selectedGroup?.events || []).find(e => e.status === 'voting' || e.status === 'confirmed');
   const getPastEvents = () => (selectedGroup?.events || []).filter(e => e.status === 'completed').slice(-10);
 
+  // ===== イベント（旅行・キャンプなど）機能 =====
+  const handleCreateSpecialEvent = (data) => {
+    const newEvent = {
+      id: `spe-${Date.now()}`,
+      ...data,
+      attendance: {},
+      status: 'active',
+      createdAt: new Date().toISOString()
+    };
+    let updated = { ...selectedGroup, specialEvents: [...(selectedGroup.specialEvents || []), newEvent] };
+    updated = addLog('イベント作成', data.title, updated);
+    updateGroup(updated);
+    notify('イベントを作成しました');
+  };
+
+  const handleEditSpecialEvent = (eventId, data) => {
+    let updated = {
+      ...selectedGroup,
+      specialEvents: (selectedGroup.specialEvents || []).map(e => e.id === eventId ? { ...e, ...data } : e)
+    };
+    updateGroup(updated);
+    notify('イベントを更新しました');
+  };
+
+  const handleDeleteSpecialEvent = (eventId) => {
+    if (!confirm('このイベントを削除しますか？')) return;
+    let updated = {
+      ...selectedGroup,
+      specialEvents: (selectedGroup.specialEvents || []).filter(e => e.id !== eventId)
+    };
+    updateGroup(updated);
+    notify('イベントを削除しました');
+  };
+
+  const handleSpecialEventVote = (eventId, memberId, vote) => {
+    let updated = {
+      ...selectedGroup,
+      specialEvents: (selectedGroup.specialEvents || []).map(e => 
+        e.id === eventId ? { ...e, attendance: { ...e.attendance, [memberId]: vote } } : e
+      )
+    };
+    updateGroup(updated);
+  };
+
+  const handleCloseSpecialEvent = (eventId) => {
+    let updated = {
+      ...selectedGroup,
+      specialEvents: (selectedGroup.specialEvents || []).map(e => 
+        e.id === eventId ? { ...e, status: 'closed' } : e
+      )
+    };
+    updateGroup(updated);
+    notify('イベントを締め切りました');
+  };
+
   if (!selectedGroup) return <div style={S.loading}>読み込み中...</div>;
 
   return (
@@ -841,6 +896,7 @@ function MoaiManager() {
           {[
             { id: 'dashboard', icon: '🏠', label: 'ホーム' },
             { id: 'party', icon: '🍻', label: '飲み会' },
+            { id: 'events', icon: '🎪', label: 'イベント' },
             { id: 'members', icon: '👥', label: 'メンバー' },
             { id: 'bulk', icon: '✅', label: '入金' },
             { id: 'receive', icon: '🎯', label: '受取' },
@@ -1224,6 +1280,20 @@ function MoaiManager() {
             onCompleteEvent={handleCompleteEvent}
             onRecordExpense={(eventId) => { setEditingEvent(selectedGroup.events.find(e => e.id === eventId)); setShowModal('expense'); }}
             onAddPhoto={handleAddPhoto}
+            notify={notify}
+          />
+        )}
+
+        {/* イベント（旅行・キャンプなど） */}
+        {currentView === 'events' && (
+          <SpecialEventsView
+            group={selectedGroup}
+            events={selectedGroup.specialEvents || []}
+            onCreateEvent={handleCreateSpecialEvent}
+            onEditEvent={handleEditSpecialEvent}
+            onDeleteEvent={handleDeleteSpecialEvent}
+            onVote={handleSpecialEventVote}
+            onClose={handleCloseSpecialEvent}
             notify={notify}
           />
         )}
@@ -2678,11 +2748,276 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
   );
 }
 
+// イベント（旅行・キャンプなど）画面
+function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDeleteEvent, onVote, onClose, notify }) {
+  const [showCreate, setShowCreate] = React.useState(false);
+  const [editingEvent, setEditingEvent] = React.useState(null);
+  const [newEvent, setNewEvent] = React.useState({ title: '', description: '', date: '', deadline: '', type: 'travel' });
+  const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
+
+  const eventTypes = [
+    { value: 'travel', label: '🚗 旅行', color: '#0ea5e9' },
+    { value: 'camp', label: '🏕️ キャンプ', color: '#10b981' },
+    { value: 'bbq', label: '🍖 BBQ', color: '#f59e0b' },
+    { value: 'sports', label: '⚽ スポーツ', color: '#8b5cf6' },
+    { value: 'other', label: '🎉 その他', color: '#ec4899' },
+  ];
+
+  const activeEvents = events.filter(e => e.status === 'active');
+  const closedEvents = events.filter(e => e.status === 'closed').slice(-5);
+
+  const handleSubmit = () => {
+    if (!newEvent.title) return;
+    if (editingEvent) {
+      onEditEvent(editingEvent.id, newEvent);
+      setEditingEvent(null);
+    } else {
+      onCreateEvent(newEvent);
+    }
+    setNewEvent({ title: '', description: '', date: '', deadline: '', type: 'travel' });
+    setShowCreate(false);
+  };
+
+  const startEdit = (event) => {
+    setNewEvent({ title: event.title, description: event.description || '', date: event.date || '', deadline: event.deadline || '', type: event.type || 'travel' });
+    setEditingEvent(event);
+    setShowCreate(true);
+  };
+
+  const getTypeInfo = (type) => eventTypes.find(t => t.value === type) || eventTypes[4];
+
+  return (
+    <div style={S.view}>
+      <div style={S.viewHeader}>
+        <h3 style={S.viewTitle}>🎪 イベント</h3>
+        <button style={S.addBtn} onClick={() => { setShowCreate(true); setEditingEvent(null); setNewEvent({ title: '', description: '', date: '', deadline: '', type: 'travel' }); }}>+</button>
+      </div>
+
+      {/* 新規作成・編集フォーム */}
+      {showCreate && (
+        <div style={{...S.card, background: '#f8fafc', border: '2px solid #0ea5e9'}}>
+          <h4 style={S.subTitle}>{editingEvent ? '✎ イベント編集' : '🎪 イベント作成'}</h4>
+          
+          {/* イベントタイプ */}
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12}}>
+            {eventTypes.map(t => (
+              <button
+                key={t.value}
+                onClick={() => setNewEvent({...newEvent, type: t.value})}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 20,
+                  border: newEvent.type === t.value ? `2px solid ${t.color}` : '2px solid #e2e8f0',
+                  background: newEvent.type === t.value ? t.color : '#fff',
+                  color: newEvent.type === t.value ? '#fff' : '#64748b',
+                  fontSize: 13,
+                  cursor: 'pointer'
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <input 
+            type="text" 
+            value={newEvent.title} 
+            onChange={e => setNewEvent({...newEvent, title: e.target.value})} 
+            style={S.input} 
+            placeholder="イベント名 *（例: 沖縄本島キャンプ）" 
+          />
+          <textarea 
+            value={newEvent.description} 
+            onChange={e => setNewEvent({...newEvent, description: e.target.value})} 
+            style={{...S.input, minHeight: 80, resize: 'vertical'}} 
+            placeholder="詳細（任意）" 
+          />
+          <div style={{display: 'flex', gap: 8}}>
+            <div style={{flex: 1}}>
+              <label style={S.label}>開催日</label>
+              <input type="date" value={newEvent.date} onChange={e => setNewEvent({...newEvent, date: e.target.value})} style={S.input} />
+            </div>
+            <div style={{flex: 1}}>
+              <label style={S.label}>回答締切</label>
+              <input type="date" value={newEvent.deadline} onChange={e => setNewEvent({...newEvent, deadline: e.target.value})} style={S.input} />
+            </div>
+          </div>
+          <div style={S.btnRow}>
+            <button style={S.cancelBtn} onClick={() => { setShowCreate(false); setEditingEvent(null); }}>キャンセル</button>
+            <button style={S.submitBtn} onClick={handleSubmit} disabled={!newEvent.title}>{editingEvent ? '更新' : '作成'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* アクティブなイベント */}
+      {activeEvents.length === 0 && !showCreate ? (
+        <div style={{...S.card, textAlign: 'center', padding: 40}}>
+          <div style={{fontSize: 48, marginBottom: 12}}>🎪</div>
+          <div style={{color: '#64748b', marginBottom: 16}}>イベントはありません</div>
+          <button style={S.createBtn} onClick={() => setShowCreate(true)}>イベントを作成</button>
+        </div>
+      ) : (
+        activeEvents.map(event => {
+          const typeInfo = getTypeInfo(event.type);
+          const att = event.attendance || {};
+          const counts = {
+            yes: Object.values(att).filter(v => v === 'yes').length,
+            no: Object.values(att).filter(v => v === 'no').length,
+            maybe: Object.values(att).filter(v => v === 'maybe').length,
+          };
+          const isDeadlinePassed = event.deadline && new Date(event.deadline) < new Date();
+
+          return (
+            <div key={event.id} style={{...S.card, borderLeft: `4px solid ${typeInfo.color}`}}>
+              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12}}>
+                <div>
+                  <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4}}>
+                    <span style={{background: typeInfo.color, color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 12}}>{typeInfo.label}</span>
+                    {isDeadlinePassed && <span style={{background: '#fee2e2', color: '#dc2626', padding: '4px 8px', borderRadius: 8, fontSize: 11}}>締切済</span>}
+                  </div>
+                  <div style={{fontSize: 18, fontWeight: 700, color: '#1e293b'}}>{event.title}</div>
+                </div>
+                <div style={{display: 'flex', gap: 6}}>
+                  <button style={{...S.editBtn, fontSize: 14}} onClick={() => startEdit(event)}>✎</button>
+                  <button style={{...S.delBtn, fontSize: 14}} onClick={() => onDeleteEvent(event.id)}>×</button>
+                </div>
+              </div>
+
+              {event.description && <div style={{fontSize: 13, color: '#64748b', marginBottom: 12, whiteSpace: 'pre-wrap'}}>{event.description}</div>}
+
+              <div style={{display: 'flex', gap: 16, fontSize: 13, color: '#64748b', marginBottom: 16}}>
+                {event.date && <span>📅 {event.date}</span>}
+                {event.deadline && <span>⏰ 締切: {event.deadline}</span>}
+              </div>
+
+              {/* 投票状況バー */}
+              <div style={{marginBottom: 12}}>
+                <div style={{display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: '#e2e8f0'}}>
+                  <div style={{background: '#10b981', width: `${(counts.yes / group.members.length) * 100}%`}}></div>
+                  <div style={{background: '#f59e0b', width: `${(counts.maybe / group.members.length) * 100}%`}}></div>
+                  <div style={{background: '#ef4444', width: `${(counts.no / group.members.length) * 100}%`}}></div>
+                </div>
+                <div style={{display: 'flex', justifyContent: 'center', gap: 16, marginTop: 8, fontSize: 14}}>
+                  <span style={{color: '#10b981'}}>⭕ {counts.yes}</span>
+                  <span style={{color: '#f59e0b'}}>🔺 {counts.maybe}</span>
+                  <span style={{color: '#ef4444'}}>❌ {counts.no}</span>
+                  <span style={{color: '#94a3b8'}}>❓ {group.members.length - counts.yes - counts.no - counts.maybe}</span>
+                </div>
+              </div>
+
+              {/* 投票 */}
+              <div style={{background: '#f8fafc', padding: 12, borderRadius: 10, marginBottom: 12}}>
+                <select value={selectedMemberId} onChange={e => setSelectedMemberId(e.target.value)} style={{...S.input, marginBottom: 8}}>
+                  {group.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+                <div style={{display: 'flex', gap: 8}}>
+                  {['yes', 'maybe', 'no'].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => onVote(event.id, selectedMemberId, v)}
+                      style={{
+                        flex: 1,
+                        padding: '12px 8px',
+                        borderRadius: 10,
+                        border: 'none',
+                        background: att[selectedMemberId] === v 
+                          ? (v === 'yes' ? '#10b981' : v === 'maybe' ? '#f59e0b' : '#ef4444') 
+                          : '#e2e8f0',
+                        color: att[selectedMemberId] === v ? '#fff' : '#64748b',
+                        fontSize: 18,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {v === 'yes' ? '⭕' : v === 'maybe' ? '🔺' : '❌'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 参加者一覧 */}
+              <div style={{fontSize: 13}}>
+                <div style={{marginBottom: 8}}>
+                  <span style={{color: '#10b981', fontWeight: 600}}>⭕ 参加 ({counts.yes}): </span>
+                  <span style={{color: '#64748b'}}>
+                    {Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                  </span>
+                </div>
+                <div style={{marginBottom: 8}}>
+                  <span style={{color: '#f59e0b', fontWeight: 600}}>🔺 未定 ({counts.maybe}): </span>
+                  <span style={{color: '#64748b'}}>
+                    {Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                  </span>
+                </div>
+                <div>
+                  <span style={{color: '#ef4444', fontWeight: 600}}>❌ 不参加 ({counts.no}): </span>
+                  <span style={{color: '#64748b'}}>
+                    {Object.entries(att).filter(([_, v]) => v === 'no').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean).join('、') || '-'}
+                  </span>
+                </div>
+              </div>
+
+              {/* LINE通知・締め切りボタン */}
+              <div style={{display: 'flex', gap: 8, marginTop: 16}}>
+                <button
+                  style={{flex: 1, padding: '10px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
+                  onClick={() => {
+                    const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+                    const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+                    const msg = `【${event.title}】出欠確認
+
+📅 ${event.date || '日程未定'}
+${event.description ? `\n${event.description}\n` : ''}
+⭕ 参加 (${yes.length}名): ${yes.join('、') || 'なし'}
+🔺 未定 (${maybe.length}名): ${maybe.join('、') || 'なし'}
+
+まだの方は回答お願いします！`;
+                    navigator.clipboard?.writeText(msg);
+                    notify('コピーしました！');
+                  }}
+                >
+                  📋 LINE用コピー
+                </button>
+                <button
+                  style={{flex: 1, padding: '10px', background: '#64748b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
+                  onClick={() => onClose(event.id)}
+                >
+                  🔒 締め切る
+                </button>
+              </div>
+            </div>
+          );
+        })
+      )}
+
+      {/* 過去のイベント */}
+      {closedEvents.length > 0 && (
+        <div style={S.card}>
+          <h4 style={S.subTitle}>📁 過去のイベント</h4>
+          {closedEvents.map(event => {
+            const typeInfo = getTypeInfo(event.type);
+            const att = event.attendance || {};
+            const yesCount = Object.values(att).filter(v => v === 'yes').length;
+            return (
+              <div key={event.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f1f5f9'}}>
+                <div>
+                  <span style={{fontSize: 12, marginRight: 8}}>{typeInfo.label.split(' ')[0]}</span>
+                  <span style={{fontWeight: 500}}>{event.title}</span>
+                </div>
+                <span style={{fontSize: 13, color: '#64748b'}}>{yesCount}名参加</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onEditEvent, onDeleteEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
   const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
   const [showAddVenue, setShowAddVenue] = React.useState(false);
   const [showPastVenues, setShowPastVenues] = React.useState(false);
-  const [newVenue, setNewVenue] = React.useState({ name: '', address: '', url: '', budget: '' });
+  const [newVenue, setNewVenue] = React.useState({ name: '', address: '', url: '' });
   const [photoUrl, setPhotoUrl] = React.useState('');
 
   if (!currentEvent) {
@@ -2838,13 +3173,95 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             </div>
           ) : showAddVenue ? (
             <div style={S.addVenueForm}>
+              {/* Google検索ボタン */}
+              <div style={{marginBottom: 12}}>
+                <button 
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'linear-gradient(135deg, #4285f4, #34a853)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 10,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8
+                  }}
+                  onClick={() => {
+                    const area = prompt('エリアを入力（例: 那覇 久茂地）', '');
+                    if (area) {
+                      window.open(`https://www.google.com/search?q=${encodeURIComponent(area + ' 居酒屋')}`, '_blank');
+                    }
+                  }}
+                >
+                  🔍 Googleで店舗を検索
+                </button>
+                <div style={{fontSize: 11, color: '#64748b', marginTop: 6, textAlign: 'center'}}>
+                  検索後、下のフォームに情報を入力してください
+                </div>
+              </div>
+
+              {/* URL貼り付けで自動入力 */}
+              <div style={{background: '#f0f9ff', padding: 12, borderRadius: 10, marginBottom: 12}}>
+                <div style={{fontSize: 12, fontWeight: 600, color: '#0369a1', marginBottom: 8}}>📋 URLから自動入力</div>
+                <input 
+                  type="text" 
+                  style={{...S.input, marginBottom: 8}} 
+                  placeholder="Google Maps や 食べログのURLを貼り付け"
+                  onChange={(e) => {
+                    const url = e.target.value;
+                    if (!url) return;
+                    
+                    // Google Maps URL から店名を抽出
+                    // 例: https://www.google.com/maps/place/店名/...
+                    // 例: https://maps.app.goo.gl/xxxxx
+                    let extractedName = '';
+                    let extractedUrl = url;
+                    
+                    try {
+                      if (url.includes('google.com/maps/place/')) {
+                        const match = url.match(/place\/([^\/]+)/);
+                        if (match) {
+                          extractedName = decodeURIComponent(match[1].replace(/\+/g, ' '));
+                        }
+                      } else if (url.includes('tabelog.com')) {
+                        // 食べログ: タイトルから取得は難しいのでURLだけセット
+                        extractedUrl = url;
+                      } else if (url.includes('hotpepper.jp')) {
+                        // ホットペッパー
+                        extractedUrl = url;
+                      }
+                      
+                      setNewVenue(prev => ({
+                        ...prev,
+                        name: extractedName || prev.name,
+                        url: extractedUrl
+                      }));
+                      
+                      if (extractedName) {
+                        notify('店舗名を自動入力しました');
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                />
+                <div style={{fontSize: 10, color: '#64748b'}}>
+                  対応: Google Maps / 食べログ / ホットペッパー
+                </div>
+              </div>
+
+              {/* 手動入力フォーム */}
               <input type="text" value={newVenue.name} onChange={e => setNewVenue({...newVenue, name: e.target.value})} style={S.input} placeholder="店舗名 *" />
               <input type="text" value={newVenue.address} onChange={e => setNewVenue({...newVenue, address: e.target.value})} style={S.input} placeholder="住所" />
-              <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL" />
-              <input type="text" value={newVenue.budget} onChange={e => setNewVenue({...newVenue, budget: e.target.value})} style={S.input} placeholder="予算" />
+              <input type="text" value={newVenue.url} onChange={e => setNewVenue({...newVenue, url: e.target.value})} style={S.input} placeholder="URL（お店のページ）" />
               <div style={S.btnRow}>
                 <button style={S.cancelBtn} onClick={() => setShowAddVenue(false)}>キャンセル</button>
-                <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '', budget: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
+                <button style={S.submitBtn} onClick={() => { onAddVenue(currentEvent.id, newVenue); setNewVenue({ name: '', address: '', url: '' }); setShowAddVenue(false); }} disabled={!newVenue.name}>追加</button>
               </div>
             </div>
           ) : (
