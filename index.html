@@ -127,7 +127,14 @@ function MoaiManager() {
   };
   
   const [currentView, setCurrentView] = React.useState(getInitialView());
-  const [isAdmin, setIsAdmin] = React.useState(false);
+  const [isAdmin, setIsAdmin] = React.useState(() => {
+    // localStorageからログイン状態を復元
+    try {
+      return localStorage.getItem('moai_admin_login') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [groups, setGroups] = React.useState([]);
   const [selectedGroup, setSelectedGroup] = React.useState(null);
@@ -243,6 +250,10 @@ function MoaiManager() {
     if (password === selectedGroup?.adminPassword) {
       setIsAdmin(true);
       setShowLoginModal(false);
+      // localStorageに保存
+      try {
+        localStorage.setItem('moai_admin_login', 'true');
+      } catch (e) {}
       notify('ログインしました');
     } else {
       notify('パスワードが違います', 'error');
@@ -251,6 +262,10 @@ function MoaiManager() {
 
   const handleLogout = () => {
     setIsAdmin(false);
+    // localStorageから削除
+    try {
+      localStorage.removeItem('moai_admin_login');
+    } catch (e) {}
     notify('ログアウトしました');
   };
 
