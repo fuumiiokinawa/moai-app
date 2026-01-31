@@ -3144,16 +3144,36 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             return (
               <div key={v.id} style={{...S.venueCard, borderColor: myVote ? '#0ea5e9' : '#e2e8f0'}}>
                 <div style={S.venueTop}>
-                  <div>
+                  <div style={{flex: 1}}>
                     <div style={{fontWeight: 600, fontSize: 15}}>{v.name}</div>
-                    {v.budget && <div style={{fontSize: 13, color: '#f59e0b'}}>💰{v.budget}</div>}
+                    {v.url && (
+                      <a 
+                        href={v.url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          marginTop: 6,
+                          padding: '6px 12px',
+                          background: '#dbeafe',
+                          color: '#1d4ed8',
+                          borderRadius: 20,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          textDecoration: 'none'
+                        }}
+                      >
+                        📍 お店の詳細を見る
+                      </a>
+                    )}
                   </div>
                   <div style={S.voteCount}>{cnt}<span style={{fontSize: 12}}>票</span></div>
                 </div>
                 <div style={S.venueActions}>
                   <button style={{...S.venueVoteBtn, background: myVote ? '#0ea5e9' : '#f1f5f9', color: myVote ? '#fff' : '#64748b'}} onClick={() => onVenueVote(currentEvent.id, selectedMemberId, v.id)}>{myVote ? '✓投票済' : '投票'}</button>
-                  {v.url && <a href={v.url} target="_blank" rel="noreferrer" style={S.venueUrlBtn}>🔗</a>}
-                  {isAdmin && <button style={S.venueDelBtn} onClick={() => onDeleteVenue(currentEvent.id, v.id)}>🗑</button>}
+                  <button style={S.venueDelBtn} onClick={() => onDeleteVenue(currentEvent.id, v.id)}>🗑</button>
                 </div>
               </div>
             );
@@ -3211,41 +3231,59 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
                 </div>
               </div>
 
-              {/* かんたん登録：URL貼り付けで即追加 */}
+              {/* かんたん登録 */}
               <div style={{background: '#ecfdf5', padding: 14, borderRadius: 12, marginBottom: 16, border: '2px solid #10b981'}}>
                 <div style={{fontSize: 13, fontWeight: 700, color: '#065f46', marginBottom: 8}}>⚡ かんたん登録</div>
-                <div style={{fontSize: 11, color: '#047857', marginBottom: 8}}>Google Maps のURLを貼り付けるだけ！</div>
+                <div style={{fontSize: 11, color: '#047857', marginBottom: 8}}>Google Maps のURLを貼り付け → 登録ボタン</div>
                 <input 
                   type="text" 
-                  style={{...S.input, marginBottom: 0, fontSize: 14}} 
-                  placeholder="URLを貼り付けて Enter"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const url = e.target.value;
-                      if (!url) return;
-                      
-                      let name = '';
-                      try {
-                        if (url.includes('google.com/maps/place/')) {
-                          const match = url.match(/place\/([^\/]+)/);
-                          if (match) {
-                            name = decodeURIComponent(match[1].replace(/\+/g, ' '));
-                          }
+                  id="quickVenueUrl"
+                  style={{...S.input, marginBottom: 10, fontSize: 14}} 
+                  placeholder="URLを貼り付け"
+                />
+                <button
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    background: '#10b981',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 10,
+                    fontSize: 15,
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    const input = document.getElementById('quickVenueUrl');
+                    const url = input?.value;
+                    if (!url) {
+                      notify('URLを入力してください');
+                      return;
+                    }
+                    
+                    let name = '';
+                    try {
+                      if (url.includes('google.com/maps/place/')) {
+                        const match = url.match(/place\/([^\/]+)/);
+                        if (match) {
+                          name = decodeURIComponent(match[1].replace(/\+/g, ' '));
                         }
-                      } catch (err) {}
-                      
-                      if (!name) {
-                        name = prompt('店舗名を入力してください', '');
                       }
-                      
-                      if (name) {
-                        onAddVenue(currentEvent.id, { name: name, url: url, address: '' });
-                        e.target.value = '';
-                        notify('店舗を追加しました！');
-                      }
+                    } catch (err) {}
+                    
+                    if (!name) {
+                      name = prompt('店舗名を入力してください', '');
+                    }
+                    
+                    if (name) {
+                      onAddVenue(currentEvent.id, { name: name, url: url, address: '' });
+                      input.value = '';
+                      notify('店舗を追加しました！');
                     }
                   }}
-                />
+                >
+                  ＋ この店舗を追加
+                </button>
               </div>
 
               {/* 詳細入力（折りたたみ） */}
