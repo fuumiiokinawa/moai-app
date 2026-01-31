@@ -693,12 +693,45 @@ function MoaiManager() {
       ...selectedGroup,
       events: selectedGroup.events.map(e => e.id === eventId ? { ...e, venues: [...e.venues, { id: `ven-${Date.now()}`, ...venue }] } : e)
     };
+    
+    // 過去店舗にも追加（重複チェック）
+    if (venue.name) {
+      const existsInPast = (updated.pastVenues || []).some(v => v.name === venue.name);
+      if (!existsInPast) {
+        updated.pastVenues = [...(updated.pastVenues || []), { 
+          id: `pv-${Date.now()}`, 
+          name: venue.name, 
+          address: venue.address || '', 
+          url: venue.url || '', 
+          budget: venue.budget || '',
+          usedCount: 0, 
+          createdAt: new Date().toISOString() 
+        }];
+      }
+    }
+    
     updateGroup(updated);
     notify('店舗を追加');
   };
 
   const handleAddVenueFromPast = (eventId, pastVenue) => {
-    handleAddVenue(eventId, { ...pastVenue, id: undefined });
+    // 過去店舗から追加する場合は、pastVenuesへの重複登録をスキップ
+    let updated = {
+      ...selectedGroup,
+      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, venues: [...e.venues, { id: `ven-${Date.now()}`, name: pastVenue.name, address: pastVenue.address, url: pastVenue.url, budget: pastVenue.budget }] } : e)
+    };
+    updateGroup(updated);
+    notify('店舗を追加');
+  };
+
+  const handleDeletePastVenue = (venueId) => {
+    if (!confirm('この店舗を候補リストから削除しますか？')) return;
+    let updated = {
+      ...selectedGroup,
+      pastVenues: (selectedGroup.pastVenues || []).filter(v => v.id !== venueId)
+    };
+    updateGroup(updated);
+    notify('店舗を削除しました');
   };
 
   const handleDeleteVenue = (eventId, venueId) => {
@@ -729,13 +762,27 @@ function MoaiManager() {
     const event = selectedGroup.events.find(e => e.id === eventId);
     const venue = event?.venues.find(v => v.id === venueId);
     
-    // 過去店舗に追加
-    const existsInPast = (selectedGroup.pastVenues || []).some(v => v.name === venue.name);
     let updated = { ...selectedGroup };
-    if (!existsInPast && venue) {
-      updated.pastVenues = [...(updated.pastVenues || []), { id: `pv-${Date.now()}`, name: venue.name, address: venue.address, url: venue.url, budget: venue.budget, usedCount: 1, lastUsed: new Date().toISOString() }];
-    } else if (venue) {
-      updated.pastVenues = (updated.pastVenues || []).map(v => v.name === venue.name ? { ...v, usedCount: (v.usedCount || 0) + 1, lastUsed: new Date().toISOString() } : v);
+    
+    // 過去店舗の使用回数をカウントアップ（既に存在するはず）
+    if (venue) {
+      const existsInPast = (updated.pastVenues || []).some(v => v.name === venue.name);
+      if (existsInPast) {
+        updated.pastVenues = (updated.pastVenues || []).map(v => 
+          v.name === venue.name ? { ...v, usedCount: (v.usedCount || 0) + 1, lastUsed: new Date().toISOString() } : v
+        );
+      } else {
+        // 万が一なければ追加（互換性のため）
+        updated.pastVenues = [...(updated.pastVenues || []), { 
+          id: `pv-${Date.now()}`, 
+          name: venue.name, 
+          address: venue.address, 
+          url: venue.url, 
+          budget: venue.budget, 
+          usedCount: 1, 
+          lastUsed: new Date().toISOString() 
+        }];
+      }
     }
     
     updated.events = updated.events.map(e => e.id === eventId ? { ...e, status: 'confirmed', confirmedVenue: venueId } : e);
@@ -821,7 +868,12 @@ function MoaiManager() {
   const handleEditSpecialEvent = (eventId, data) => {
     let updated = {
       ...selectedGroup,
-      specialEvents: (selectedGroup.specialEvents || []).map(e => e.id === eventId ? { ...e, ...data } : e)
+      specialEvents: (selectedGroup.specialEvents || []).map(e => e.id === eventId ? { 
+        ...e, 
+        ...data,
+        status: e.status, // statusは変更しない
+        attendance: e.attendance // 投票結果も保持
+      } : e)
     };
     updateGroup(updated);
     notify('イベントを更新しました');
@@ -856,6 +908,17 @@ function MoaiManager() {
     };
     updateGroup(updated);
     notify('イベントを締め切りました');
+  };
+
+  const handleReopenSpecialEvent = (eventId) => {
+    let updated = {
+      ...selectedGroup,
+      specialEvents: (selectedGroup.specialEvents || []).map(e => 
+        e.id === eventId ? { ...e, status: 'active' } : e
+      )
+    };
+    updateGroup(updated);
+    notify('イベントを再開しました');
   };
 
   if (!selectedGroup) return <div style={S.loading}>読み込み中...</div>;
@@ -1282,6 +1345,7 @@ function MoaiManager() {
             onAddVenue={handleAddVenue}
             onAddVenueFromPast={handleAddVenueFromPast}
             onDeleteVenue={handleDeleteVenue}
+            onDeletePastVenue={handleDeletePastVenue}
             onAttendanceVote={handleAttendanceVote}
             onVenueVote={handleVenueVote}
             onConfirmEvent={handleConfirmEvent}
@@ -1302,6 +1366,7 @@ function MoaiManager() {
             onDeleteEvent={handleDeleteSpecialEvent}
             onVote={handleSpecialEventVote}
             onClose={handleCloseSpecialEvent}
+            onReopen={handleReopenSpecialEvent}
             notify={notify}
           />
         )}
@@ -2757,7 +2822,7 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
 }
 
 // イベント（旅行・キャンプなど）画面
-function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDeleteEvent, onVote, onClose, notify }) {
+function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDeleteEvent, onVote, onClose, onReopen, notify }) {
   const [showCreate, setShowCreate] = React.useState(false);
   const [editingEvent, setEditingEvent] = React.useState(null);
   const [newEvent, setNewEvent] = React.useState({ title: '', description: '', date: '', deadline: '', type: 'travel' });
@@ -2989,8 +3054,12 @@ ${appUrl}`;
                   📋 LINE用コピー
                 </button>
                 <button
-                  style={{flex: 1, padding: '10px', background: '#64748b', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
-                  onClick={() => onClose(event.id)}
+                  style={{flex: 1, padding: '10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
+                  onClick={() => {
+                    if (confirm(`「${event.title}」を締め切りますか？\n\n締め切ると投票できなくなります。`)) {
+                      onClose(event.id);
+                    }
+                  }}
                 >
                   🔒 締め切る
                 </button>
@@ -3014,7 +3083,23 @@ ${appUrl}`;
                   <span style={{fontSize: 12, marginRight: 8}}>{typeInfo.label.split(' ')[0]}</span>
                   <span style={{fontWeight: 500}}>{event.title}</span>
                 </div>
-                <span style={{fontSize: 13, color: '#64748b'}}>{yesCount}名参加</span>
+                <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                  <span style={{fontSize: 13, color: '#64748b'}}>{yesCount}名参加</span>
+                  <button
+                    onClick={() => onReopen(event.id)}
+                    style={{
+                      padding: '4px 10px',
+                      background: '#f0f9ff',
+                      color: '#0369a1',
+                      border: '1px solid #0ea5e9',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔓 再開
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -3024,7 +3109,7 @@ ${appUrl}`;
   );
 }
 
-function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onEditEvent, onDeleteEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
+function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate, onCreateEvent, onEditEvent, onDeleteEvent, onAddVenue, onAddVenueFromPast, onDeleteVenue, onDeletePastVenue, onAttendanceVote, onVenueVote, onConfirmEvent, onCompleteEvent, onRecordExpense, onAddPhoto, notify }) {
   const [selectedMemberId, setSelectedMemberId] = React.useState(group.members[0]?.id || '');
   const [showAddVenue, setShowAddVenue] = React.useState(false);
   const [showPastVenues, setShowPastVenues] = React.useState(false);
@@ -3193,11 +3278,28 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
           {/* 店舗追加（誰でもOK） */}
           {showPastVenues ? (
             <div style={S.pastVenuesBox}>
-              <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 過去の店舗</div>
-              {(group.pastVenues || []).length === 0 ? <div style={S.empty}>履歴なし</div> : (group.pastVenues || []).map(v => (
-                <div key={v.id} style={S.pastVenueItem} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
-                  <span style={{fontSize: 14}}>{v.name}</span>
-                  <span style={{fontSize: 12, color: '#64748b'}}>{v.usedCount}回利用</span>
+              <div style={{fontWeight: 600, marginBottom: 10, fontSize: 15}}>🏮 候補店舗リスト</div>
+              <div style={{fontSize: 12, color: '#64748b', marginBottom: 10}}>タップして今回の候補に追加</div>
+              {(group.pastVenues || []).length === 0 ? <div style={S.empty}>店舗登録なし</div> : (group.pastVenues || []).map(v => (
+                <div key={v.id} style={{...S.pastVenueItem, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                  <div style={{flex: 1, cursor: 'pointer'}} onClick={() => { onAddVenueFromPast(currentEvent.id, v); setShowPastVenues(false); }}>
+                    <div style={{fontSize: 14, fontWeight: 500}}>{v.name}</div>
+                    <div style={{fontSize: 11, color: '#64748b'}}>{v.usedCount > 0 ? `${v.usedCount}回利用` : '未利用'}</div>
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); onDeletePastVenue(v.id); }}
+                    style={{
+                      padding: '4px 8px',
+                      background: '#fee2e2',
+                      color: '#dc2626',
+                      border: 'none',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    削除
+                  </button>
                 </div>
               ))}
               <button style={S.linkBtn} onClick={() => setShowPastVenues(false)}>閉じる</button>
