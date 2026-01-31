@@ -603,6 +603,10 @@ function MoaiManager() {
       return info.status === 'unpaid';
     });
     
+    // 受取IDを先に生成
+    const newReceiveId = `rec-${Date.now()}`;
+    const timestamp = new Date().toISOString();
+    
     // 相殺入金を作成
     const offsetPayments = unpaidMonths.map((month, idx) => ({
       id: `pay-offset-${Date.now()}-${idx}`,
@@ -612,13 +616,13 @@ function MoaiManager() {
       savings: selectedGroup.savingsAmount,
       status: 'active',
       isOffset: true, // 相殺フラグ
-      receiveId: `rec-${Date.now()}`, // 紐付く受取ID
-      recordedAt: new Date().toISOString()
+      receiveId: newReceiveId, // 紐付く受取ID
+      recordedAt: timestamp
     }));
     
     let updated = { 
       ...selectedGroup, 
-      receives: [...selectedGroup.receives, { id: `rec-${Date.now()}`, ...data, status: 'active', recordedAt: new Date().toISOString() }],
+      receives: [...selectedGroup.receives, { id: newReceiveId, ...data, status: 'active', recordedAt: timestamp }],
       payments: [...selectedGroup.payments, ...offsetPayments] // 相殺入金を追加
     };
     // 受取希望があれば削除
@@ -661,14 +665,23 @@ function MoaiManager() {
 
   // 受取取消（論理削除）
   const handleCancelReceive = (receiveId) => {
-    if (!confirm('この受取を取り消しますか？\n（履歴には残ります）')) return;
+    if (!confirm('この受取を取り消しますか？\n（相殺入金も一緒に取り消されます）')) return;
     const receive = selectedGroup.receives.find(r => r.id === receiveId);
     const member = selectedGroup.members.find(m => m.id === receive?.winnerId);
+    
+    // 紐づく相殺入金も取り消す
+    const offsetPaymentIds = selectedGroup.payments
+      .filter(p => p.receiveId === receiveId || (p.isOffset && p.memberId === receive?.winnerId && p.recordedAt === receive?.recordedAt))
+      .map(p => p.id);
+    
     let updated = {
       ...selectedGroup,
-      receives: selectedGroup.receives.map(r => r.id === receiveId ? { ...r, status: 'deleted', deletedAt: new Date().toISOString() } : r)
+      receives: selectedGroup.receives.map(r => r.id === receiveId ? { ...r, status: 'deleted', deletedAt: new Date().toISOString() } : r),
+      payments: selectedGroup.payments.map(p => 
+        offsetPaymentIds.includes(p.id) ? { ...p, status: 'deleted', deletedAt: new Date().toISOString() } : p
+      )
     };
-    updated = addLog('受取取消', `${receive?.month} ${member?.name}`, updated);
+    updated = addLog('受取取消', `${receive?.month} ${member?.name}${offsetPaymentIds.length > 0 ? `（相殺${offsetPaymentIds.length}件も取消）` : ''}`, updated);
     updateGroup(updated);
     notify('受取を取り消しました');
   };
@@ -1821,13 +1834,25 @@ function MoaiManager() {
               {(selectedGroup.auditLog || []).length === 0 ? (
                 <div style={S.empty}>履歴なし</div>
               ) : (
-                (selectedGroup.auditLog || []).slice().reverse().slice(0, 50).map(log => (
-                  <div key={log.id} style={{...S.histRow, fontSize: 13}}>
-                    <span style={{fontSize: 11, color: '#64748b', minWidth: 80}}>{log.timestamp?.slice(5, 16).replace('T', ' ')}</span>
-                    <span style={{fontWeight: 600, color: '#334155'}}>{log.action}</span>
-                    <span style={{flex: 1, color: '#64748b'}}>{log.details}</span>
-                  </div>
-                ))
+                (selectedGroup.auditLog || []).slice().reverse().slice(0, 50).map(log => {
+                  // UTCから日本時間に変換して表示
+                  const formatJST = (isoStr) => {
+                    if (!isoStr) return '';
+                    const d = new Date(isoStr);
+                    const month = String(d.getMonth() + 1).padStart(2, '0');
+                    const day = String(d.getDate()).padStart(2, '0');
+                    const hours = String(d.getHours()).padStart(2, '0');
+                    const mins = String(d.getMinutes()).padStart(2, '0');
+                    return `${month}/${day} ${hours}:${mins}`;
+                  };
+                  return (
+                    <div key={log.id} style={{...S.histRow, fontSize: 13}}>
+                      <span style={{fontSize: 11, color: '#64748b', minWidth: 80}}>{formatJST(log.timestamp)}</span>
+                      <span style={{fontWeight: 600, color: '#334155'}}>{log.action}</span>
+                      <span style={{flex: 1, color: '#64748b'}}>{log.details}</span>
+                    </div>
+                  );
+                })
               )}
             </div>
           </div>
