@@ -3400,6 +3400,10 @@ function HelpView({ isAdmin, group }) {
           <p style={styles.p}>飲み会作成後に自動で投票依頼画面が表示されます。誰でもLINEで送信できます。</p>
         </div>
         <div style={styles.subSection}>
+          <div style={styles.subTitle}>📊 経過通知（途中報告）</div>
+          <p style={styles.p}>「📱 出欠状況をLINEで送る」ボタンで、現在の出欠状況と未回答者をLINE通知できます。</p>
+        </div>
+        <div style={styles.subSection}>
           <div style={styles.subTitle}>🏮 候補店舗リスト</div>
           <p style={styles.p}>店舗を追加すると自動的に候補リストに保存されます。次回以降はリストから選んで追加できます。</p>
         </div>
@@ -4375,6 +4379,60 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             </div>
           ))}
         </div>
+        
+        {/* 経過通知ボタン */}
+        <button 
+          style={{
+            width: '100%',
+            marginTop: 12,
+            padding: '10px',
+            background: '#06c755',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+          onClick={() => {
+            const dayOfWeek = ['日','月','火','水','木','金','土'][new Date(currentEvent.date).getDay()];
+            const appUrl = window.location.href.split('?')[0] + '?view=party';
+            const deadlineDisplay = currentEvent.deadline ? `${currentEvent.deadline}まで` : '未定';
+            
+            const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+            const late = Object.entries(att).filter(([_, v]) => v === 'late').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+            const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+            const no = Object.entries(att).filter(([_, v]) => v === 'no').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+            const notVoted = group.members.filter(m => !att[m.id]).map(m => m.name);
+            
+            const message = `📊 ${group.name} 飲み会 出欠状況 📊
+
+━━━━━━━━━━━━━━━━
+📅 ${currentEvent.date} (${dayOfWeek}) ${currentEvent.time || ''}〜
+⏰ 締切: ${deadlineDisplay}
+━━━━━━━━━━━━━━━━
+
+⭕ 参加 (${yes.length}名): ${yes.join('、') || '-'}
+
+${late.length > 0 ? `🕐 遅れ (${late.length}名): ${late.join('、')}\n\n` : ''}🔺 未定 (${maybe.length}名): ${maybe.join('、') || '-'}
+
+❌ 不参加 (${no.length}名): ${no.join('、') || '-'}
+
+${notVoted.length > 0 ? `⚠️ 未回答 (${notVoted.length}名): ${notVoted.join('、')}\n\n回答がまだの方はお早めに！🙏` : '✅ 全員回答済み！'}
+
+👇 投票はこちら
+${appUrl}`;
+
+            if (group.lineGroupUrl) {
+              window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+            } else {
+              navigator.clipboard?.writeText(message);
+              notify('コピーしました！LINEに貼り付けてください');
+            }
+          }}
+        >
+          📱 出欠状況をLINEで送る
+        </button>
       </div>
 
       {/* 店舗候補 */}
@@ -4698,7 +4756,7 @@ const S = {
   subTitle: { fontSize: 15, fontWeight: 600, marginBottom: 10, color: '#334155' },
   row: { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f1f5f9', fontSize: 15 },
   unpaidBox: { marginTop: 10, padding: 12, background: '#fef2f2', borderRadius: 8, fontSize: 14, color: '#dc2626', lineHeight: 1.5 },
-  quickBtns: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 },
+  quickBtns: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 },
   qBtn: { padding: '14px 8px', background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: 12, fontSize: 13, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
   lotteryBtn: { width: '100%', padding: 16, background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: 'pointer', minHeight: 52 },
   addBtn: { width: 44, height: 44, background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '50%', fontSize: 24, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
