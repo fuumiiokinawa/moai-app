@@ -1014,25 +1014,48 @@ function MoaiManager() {
             {/* 未払いアラート */}
             {(() => {
               const delinquents = getDelinquentMembers();
-              const serious = delinquents.filter(d => d.unpaidMonths >= 2);
-              if (serious.length > 0) {
+              if (delinquents.length > 0) {
+                const serious = delinquents.filter(d => d.unpaidMonths >= 2);
+                const totalAmount = delinquents.reduce((sum, d) => sum + d.unpaidAmount, 0);
                 return (
-                  <div style={{background: '#fef2f2', border: '2px solid #fecaca', borderRadius: 14, padding: 16}}>
-                    <h4 style={{color: '#dc2626', fontSize: 15, fontWeight: 700, marginBottom: 10}}>⚠️ 滞納アラート</h4>
-                    {serious.map(m => (
+                  <div style={{background: serious.length > 0 ? '#fef2f2' : '#fffbeb', border: `2px solid ${serious.length > 0 ? '#fecaca' : '#fde68a'}`, borderRadius: 14, padding: 16}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+                      <h4 style={{color: serious.length > 0 ? '#dc2626' : '#d97706', fontSize: 15, fontWeight: 700, margin: 0}}>
+                        {serious.length > 0 ? '⚠️ 滞納アラート' : '📋 未払い状況'}
+                      </h4>
+                      <span style={{background: serious.length > 0 ? '#dc2626' : '#f59e0b', color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600}}>
+                        {delinquents.length}名 / ¥{(totalAmount/1000).toFixed(0)}千
+                      </span>
+                    </div>
+                    {delinquents.slice(0, 3).map(m => (
                       <div key={m.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #fecaca'}}>
                         <span style={{fontWeight: 600}}>{m.name}</span>
                         <div style={{textAlign: 'right'}}>
-                          <div style={{color: '#dc2626', fontWeight: 700}}>{m.unpaidMonths}ヶ月滞納</div>
-                          <div style={{fontSize: 12, color: '#b91c1c'}}>¥{(m.unpaidAmount/1000).toFixed(0)}千</div>
+                          <div style={{color: m.unpaidMonths >= 2 ? '#dc2626' : '#d97706', fontWeight: 700}}>{m.unpaidMonths}ヶ月</div>
+                          <div style={{fontSize: 12, color: '#64748b'}}>¥{m.unpaidAmount.toLocaleString()}</div>
                         </div>
                       </div>
                     ))}
-                    {isAdmin && (
-                      <button style={{...S.linkBtn, color: '#dc2626', marginTop: 8}} onClick={() => setShowModal('reminderLine')}>
-                        📱 催促メッセージを作成
-                      </button>
+                    {delinquents.length > 3 && (
+                      <div style={{fontSize: 12, color: '#64748b', padding: '8px 0'}}>...他 {delinquents.length - 3}名</div>
                     )}
+                    <button 
+                      style={{
+                        width: '100%',
+                        marginTop: 12,
+                        padding: '12px',
+                        background: '#06c755',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 10,
+                        fontSize: 14,
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }} 
+                      onClick={() => setShowModal('reminderLine')}
+                    >
+                      📱 LINE催促メッセージを作成
+                    </button>
                   </div>
                 );
               }
@@ -1424,7 +1447,7 @@ function MoaiManager() {
 
         {/* 一括入金 */}
         {currentView === 'bulk' && (
-          <BulkPaymentView group={selectedGroup} month={selectedMonth} setMonth={setSelectedMonth} getMonthlyStatus={getMonthlyStatus} onSubmit={handleBulkPayment} isAdmin={isAdmin} />
+          <BulkPaymentView group={selectedGroup} month={selectedMonth} setMonth={setSelectedMonth} getMonthlyStatus={getMonthlyStatus} onSubmit={handleBulkPayment} isAdmin={isAdmin} onOpenReminder={() => setShowModal('reminderLine')} delinquents={getDelinquentMembers()} />
         )}
 
         {/* 受取 */}
@@ -1484,8 +1507,76 @@ function MoaiManager() {
           <div style={S.view}>
             <div style={S.viewHeader}>
               <h3 style={S.viewTitle}>📊 一覧表</h3>
-              <button style={S.exportBtn} onClick={() => setShowModal('export')}>📥</button>
+              <div style={{display: 'flex', gap: 8}}>
+                <button style={{...S.exportBtn, background: '#06c755'}} onClick={() => {
+                  // テキスト形式で一覧表を生成
+                  const monthList = getMonthList();
+                  const currentMonth = new Date().toISOString().slice(0, 7);
+                  const targetMonths = monthList.filter(m => m <= currentMonth); // 開始月から当月まで
+                  
+                  let text = `📊 ${selectedGroup.name} 入金状況\n`;
+                  text += `━━━━━━━━━━━━━━━━\n`;
+                  text += `📅 ${new Date().toLocaleDateString('ja-JP')} 現在\n`;
+                  text += `📆 ${selectedGroup.startMonth?.replace('-', '年') + '月'}〜${currentMonth.replace('-', '年') + '月'}（${targetMonths.length}ヶ月）\n\n`;
+                  
+                  // 凡例
+                  text += `【凡例】✅済 ／ ⬜未 ／ 🔄相殺\n\n`;
+                  
+                  // 各メンバー（縦型レイアウト）
+                  selectedGroup.members.forEach((m, idx) => {
+                    const bal = getMemberBalance(m.id);
+                    const paidCount = targetMonths.filter(month => {
+                      const info = getMemberPaymentForMonth(m.id, month);
+                      return info.status === 'paid' || info.status === 'offset';
+                    }).length;
+                    const unpaidCount = targetMonths.length - paidCount;
+                    
+                    text += `${idx + 1}. ${m.name}\n`;
+                    
+                    // 月ごとのステータスを行で表示
+                    let statusLine = '';
+                    targetMonths.forEach(month => {
+                      const info = getMemberPaymentForMonth(m.id, month);
+                      const mark = info.status === 'paid' ? '✅' : info.status === 'offset' ? '🔄' : '⬜';
+                      statusLine += mark;
+                    });
+                    text += `　${statusLine}\n`;
+                    text += `　→ ${paidCount}/${targetMonths.length}済`;
+                    if (bal.balance < 0) {
+                      text += ` ⚠️未払¥${Math.abs(bal.balance).toLocaleString()}`;
+                    }
+                    text += `\n\n`;
+                  });
+                  
+                  text += `━━━━━━━━━━━━━━━━\n`;
+                  
+                  // サマリー
+                  const delinquents = selectedGroup.members.filter(m => getMemberBalance(m.id).balance < 0);
+                  const totalUnpaid = delinquents.reduce((sum, m) => sum + Math.abs(getMemberBalance(m.id).balance), 0);
+                  
+                  if (delinquents.length > 0) {
+                    text += `⚠️ 未払い: ${delinquents.length}名 / ¥${totalUnpaid.toLocaleString()}\n`;
+                  } else {
+                    text += `✅ 全員入金済み！\n`;
+                  }
+                  
+                  if (selectedGroup.lineGroupUrl) {
+                    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(text)}`, '_blank');
+                  } else {
+                    navigator.clipboard?.writeText(text);
+                    notify('コピーしました！LINEに貼り付けてください');
+                  }
+                }}>📱</button>
+                <button style={S.exportBtn} onClick={() => setShowModal('export')}>📥</button>
+              </div>
             </div>
+            
+            {/* LINE共有の説明 */}
+            <div style={{fontSize: 11, color: '#64748b', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8}}>
+              <span>📱 = LINE共有（全期間）</span>
+              <span>📥 = CSV出力</span>
+            </div>
+            
             <div style={S.tableWrap}>
               <table style={S.table}>
                 <thead><tr>
@@ -1627,7 +1718,7 @@ function MoaiManager() {
           {showModal === 'settings' && <SettingsForm group={selectedGroup} onSubmit={handleUpdateGroup} onChangePassword={handleChangePassword} onCancel={() => setShowModal(null)} />}
           {showModal === 'export' && <ExportForm group={selectedGroup} getMonthList={getMonthList} getMemberPaymentForMonth={getMemberPaymentForMonth} getMemberBalance={getMemberBalance} onCancel={() => setShowModal(null)} />}
           {showModal === 'savingsUsage' && <SavingsUsageForm group={selectedGroup} totalSavings={getTotalSavings()} onSubmit={handleUseSavings} onCancel={() => setShowModal(null)} onCancelUsage={handleCancelSavingsUsage} />}
-          {showModal === 'paymentReminder' && <PaymentReminderModal group={selectedGroup} month={selectedMonth} status={getMonthlyStatus(selectedMonth)} onClose={() => setShowModal(null)} notify={notify} />}
+          {showModal === 'paymentReminder' && <PaymentReminderModal group={selectedGroup} month={selectedMonth} status={getMonthlyStatus(selectedMonth)} onClose={() => setShowModal(null)} notify={notify} getMonthlyStatus={getMonthlyStatus} getMonthList={getMonthList} />}
           {showModal === 'reminderLine' && <DelinquentReminderModal group={selectedGroup} delinquents={getDelinquentMembers()} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'receiveOrder' && <ReceiveOrderModal group={selectedGroup} receiveOrder={getReceiveOrder()} onClose={() => setShowModal(null)} />}
         </Modal>
@@ -2121,12 +2212,41 @@ function SavingsUsageForm({ group, totalSavings, onSubmit, onCancel, onCancelUsa
 }
 
 // 入金リマインドLINEメッセージ
-function PaymentReminderModal({ group, month, status, onClose, notify }) {
-  const monthDisplay = month.replace('-', '年') + '月';
-  const unpaidNames = status.unpaid.map(m => m.name).join('、');
+function PaymentReminderModal({ group, month, status, onClose, notify, getMonthlyStatus, getMonthList }) {
+  const [selectedMonth, setSelectedMonth] = React.useState(month);
+  const [messageType, setMessageType] = React.useState('monthly'); // 'monthly' or 'summary'
+  
+  const monthList = getMonthList ? getMonthList() : [];
+  const currentMonthStatus = getMonthlyStatus ? getMonthlyStatus(selectedMonth) : status;
+  const monthDisplay = selectedMonth.replace('-', '年') + '月';
   const amount = (group.monthlyAmount + group.savingsAmount).toLocaleString();
   
-  const message = `🌺 ${group.name} 入金のお願い 🌺
+  // 月別の未払いメンバー一覧を取得
+  const getUnpaidSummary = () => {
+    if (!getMonthlyStatus || !getMonthList) return [];
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const pastMonths = monthList.filter(m => m <= currentMonth);
+    
+    const summary = [];
+    pastMonths.forEach(m => {
+      const st = getMonthlyStatus(m);
+      if (st.unpaid.length > 0) {
+        summary.push({
+          month: m,
+          monthDisplay: m.replace('-', '年') + '月',
+          unpaid: st.unpaid,
+          count: st.unpaid.length
+        });
+      }
+    });
+    return summary.reverse(); // 新しい月が上
+  };
+  
+  const unpaidSummary = getUnpaidSummary();
+  const totalUnpaidCount = unpaidSummary.reduce((sum, s) => sum + s.count, 0);
+  
+  // 月別メッセージ
+  const monthlyMessage = `🌺 ${group.name} 入金のお願い 🌺
 
 ━━━━━━━━━━━━━━━━
 📅 ${monthDisplay}分
@@ -2134,29 +2254,134 @@ function PaymentReminderModal({ group, month, status, onClose, notify }) {
 🏦 振込先: ${group.bankInfo || '（要確認）'}
 ━━━━━━━━━━━━━━━━
 
-${status.unpaid.length > 0 ? `⏳ 未入金の方（${status.unpaid.length}名）:
-${unpaidNames}
+${currentMonthStatus.unpaid.length > 0 ? `⏳ 未入金の方（${currentMonthStatus.unpaid.length}名）:
+${currentMonthStatus.unpaid.map(m => m.name).join('、')}
 
 お忙しいところ恐れ入りますが、
 ご確認をお願いいたします🙏` : '✅ 全員入金済みです！ありがとうございます🎉'}`;
+
+  // サマリーメッセージ（全月分）
+  const summaryMessage = `🌺 ${group.name} 入金状況のお知らせ 🌺
+
+━━━━━━━━━━━━━━━━
+💰 月額: ¥${amount}
+🏦 振込先: ${group.bankInfo || '（要確認）'}
+━━━━━━━━━━━━━━━━
+
+${unpaidSummary.length > 0 ? unpaidSummary.map(s => 
+`📅 ${s.monthDisplay} 未入金（${s.count}名）:
+${s.unpaid.map(m => `　・${m.name}`).join('\n')}`
+).join('\n\n') : '✅ 全員全月入金済みです！'}
+
+${unpaidSummary.length > 0 ? `\nお心当たりのある方は、
+ご確認をお願いいたします🙏` : ''}`;
+
+  const message = messageType === 'monthly' ? monthlyMessage : summaryMessage;
 
   const handleCopy = () => {
     navigator.clipboard?.writeText(message);
     notify('コピーしました！');
   };
 
+  const handleLineShare = () => {
+    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+  };
+
   return (
     <div style={S.form}>
       <h3 style={S.formTitle}>📱 入金リマインド</h3>
-      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 300, overflow: 'auto'}}>
+      
+      {/* メッセージタイプ切り替え */}
+      <div style={{display: 'flex', gap: 8, marginBottom: 12}}>
+        <button
+          onClick={() => setMessageType('monthly')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            background: messageType === 'monthly' ? '#0ea5e9' : '#f1f5f9',
+            color: messageType === 'monthly' ? '#fff' : '#64748b',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          📅 月別通知
+        </button>
+        <button
+          onClick={() => setMessageType('summary')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            background: messageType === 'summary' ? '#0ea5e9' : '#f1f5f9',
+            color: messageType === 'summary' ? '#fff' : '#64748b',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          📋 全体サマリー
+        </button>
+      </div>
+      
+      {/* 月別の場合は月選択 */}
+      {messageType === 'monthly' && (
+        <div style={{marginBottom: 12}}>
+          <label style={S.label}>対象月</label>
+          <select 
+            value={selectedMonth} 
+            onChange={e => setSelectedMonth(e.target.value)} 
+            style={S.input}
+          >
+            {monthList.filter(m => m <= new Date().toISOString().slice(0, 7)).reverse().map(m => {
+              const st = getMonthlyStatus ? getMonthlyStatus(m) : { unpaid: [] };
+              return (
+                <option key={m} value={m}>
+                  {m.replace('-', '年') + '月'} {st.unpaid.length > 0 ? `（未払${st.unpaid.length}名）` : '（完了）'}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
+      
+      {/* 未払いサマリー表示 */}
+      {messageType === 'summary' && unpaidSummary.length > 0 && (
+        <div style={{background: '#fef2f2', padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 13}}>
+          <div style={{fontWeight: 600, color: '#dc2626', marginBottom: 8}}>
+            ⚠️ 未払い状況（{totalUnpaidCount}件）
+          </div>
+          {unpaidSummary.slice(0, 3).map(s => (
+            <div key={s.month} style={{marginBottom: 4}}>
+              <span style={{color: '#64748b'}}>{s.monthDisplay}:</span> {s.unpaid.map(m => m.name).join('、')}
+            </div>
+          ))}
+          {unpaidSummary.length > 3 && (
+            <div style={{color: '#94a3b8', fontSize: 12}}>...他 {unpaidSummary.length - 3}ヶ月</div>
+          )}
+        </div>
+      )}
+      
+      {/* メッセージプレビュー */}
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto'}}>
         {message}
       </div>
+      
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
-        <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+        {group.lineGroupUrl ? (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleLineShare}>💬 LINEで送る</button>
+        ) : (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+        )}
       </div>
-      {group.lineGroupUrl && (
-        <a href={group.lineGroupUrl} target="_blank" rel="noreferrer" style={{...S.lineLink, marginTop: 10}}>💬 LINEを開く</a>
+      {!group.lineGroupUrl && (
+        <div style={{fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8}}>
+          💡 設定でLINEグループURLを登録すると直接送れます
+        </div>
       )}
     </div>
   );
@@ -2164,16 +2389,52 @@ ${unpaidNames}
 
 // 滞納者催促メッセージ
 function DelinquentReminderModal({ group, delinquents, onClose, notify }) {
+  const [messageType, setMessageType] = React.useState('all'); // 'all' or 'individual'
   const [selectedMember, setSelectedMember] = React.useState(delinquents[0]?.id || '');
   const member = delinquents.find(d => d.id === selectedMember);
   
-  const message = member ? `${member.name}さん
+  // 全体の未払い総額
+  const totalUnpaidAmount = delinquents.reduce((sum, d) => sum + d.unpaidAmount, 0);
+  const totalUnpaidMonths = delinquents.reduce((sum, d) => sum + d.unpaidMonths, 0);
+  
+  // 全体向けメッセージ（グループLINE用）
+  const allMessage = `🌺 ${group.name} 入金確認のお願い 🌺
+
+━━━━━━━━━━━━━━━━
+⚠️ 未入金状況のお知らせ
+━━━━━━━━━━━━━━━━
+
+現在、以下の方に未入金があります。
+ご確認をお願いいたします🙏
+
+${delinquents.map(d => 
+`📌 ${d.name}さん
+　　${d.unpaidMonths}ヶ月分 / ¥${d.unpaidAmount.toLocaleString()}`
+).join('\n\n')}
+
+━━━━━━━━━━━━━━━━
+💰 未入金合計: ¥${totalUnpaidAmount.toLocaleString()}
+🏦 振込先: ${group.bankInfo || '（要確認）'}
+━━━━━━━━━━━━━━━━
+
+何かご事情がありましたら、
+お気軽にご連絡ください。`;
+
+  // 個別メッセージ
+  const individualMessage = member ? `${member.name}さん
 
 お疲れ様です。
 ${group.name}の模合について確認させてください。
 
-現在 ${member.unpaidMonths}ヶ月分（¥${(member.unpaidAmount/1000).toFixed(0)}千）が未入金となっております。
+━━━━━━━━━━━━━━━━
+⏳ 未入金: ${member.unpaidMonths}ヶ月分
+💰 金額: ¥${member.unpaidAmount.toLocaleString()}
+━━━━━━━━━━━━━━━━
 
+${member.unpaidMonthsList && member.unpaidMonthsList.length > 0 ? 
+`📅 対象月:
+${member.unpaidMonthsList.map(m => `　・${m.replace('-', '年') + '月'}`).join('\n')}
+` : ''}
 お忙しいところ恐縮ですが、
 ご確認いただけますでしょうか。
 
@@ -2184,29 +2445,111 @@ ${group.name}の模合について確認させてください。
 🏦 振込先: ${group.bankInfo || '（要確認）'}
 ━━━━━━━━━━━━━━━━` : '';
 
+  const message = messageType === 'all' ? allMessage : individualMessage;
+
   const handleCopy = () => {
     navigator.clipboard?.writeText(message);
     notify('コピーしました！');
   };
 
+  const handleLineShare = () => {
+    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+  };
+
   return (
     <div style={S.form}>
-      <h3 style={S.formTitle}>📱 催促メッセージ</h3>
+      <h3 style={S.formTitle}>📱 滞納催促メッセージ</h3>
       
-      <label style={S.label}>送信先</label>
-      <select value={selectedMember} onChange={e => setSelectedMember(e.target.value)} style={S.input}>
-        {delinquents.map(d => (
-          <option key={d.id} value={d.id}>{d.name}（{d.unpaidMonths}ヶ月滞納）</option>
-        ))}
-      </select>
+      {/* 未払いサマリー表示 */}
+      <div style={{background: '#fef2f2', padding: 14, borderRadius: 10, marginBottom: 12, border: '2px solid #fecaca'}}>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+          <span style={{fontWeight: 700, color: '#dc2626', fontSize: 15}}>⚠️ 滞納状況</span>
+          <span style={{background: '#dc2626', color: '#fff', padding: '4px 10px', borderRadius: 12, fontSize: 13, fontWeight: 600}}>
+            {delinquents.length}名 / ¥{(totalUnpaidAmount/1000).toFixed(0)}千
+          </span>
+        </div>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+          {delinquents.map(d => (
+            <div key={d.id} style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#fff', borderRadius: 6, border: '1px solid #fecaca'}}>
+              <div>
+                <span style={{fontWeight: 600}}>{d.name}</span>
+                <span style={{fontSize: 12, color: '#64748b', marginLeft: 8}}>{d.unpaidMonths}ヶ月</span>
+              </div>
+              <span style={{color: '#dc2626', fontWeight: 700}}>¥{d.unpaidAmount.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      </div>
       
-      <div style={{background: '#fef2f2', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto', marginTop: 10}}>
+      {/* メッセージタイプ切り替え */}
+      <div style={{display: 'flex', gap: 8, marginBottom: 12}}>
+        <button
+          onClick={() => setMessageType('all')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            background: messageType === 'all' ? '#dc2626' : '#f1f5f9',
+            color: messageType === 'all' ? '#fff' : '#64748b',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          👥 全員向け一括
+        </button>
+        <button
+          onClick={() => setMessageType('individual')}
+          style={{
+            flex: 1,
+            padding: '10px',
+            background: messageType === 'individual' ? '#dc2626' : '#f1f5f9',
+            color: messageType === 'individual' ? '#fff' : '#64748b',
+            border: 'none',
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: 'pointer'
+          }}
+        >
+          👤 個別送信
+        </button>
+      </div>
+      
+      {/* 個別の場合はメンバー選択 */}
+      {messageType === 'individual' && (
+        <div style={{marginBottom: 12}}>
+          <label style={S.label}>送信先</label>
+          <select value={selectedMember} onChange={e => setSelectedMember(e.target.value)} style={S.input}>
+            {delinquents.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.name}（{d.unpaidMonths}ヶ月 / ¥{d.unpaidAmount.toLocaleString()}）
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      
+      {/* メッセージプレビュー */}
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 200, overflow: 'auto'}}>
         {message}
       </div>
       
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
-        <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+        {group.lineGroupUrl && messageType === 'all' ? (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleLineShare}>💬 LINEで送る</button>
+        ) : (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={messageType === 'all' ? handleCopy : handleLineShare}>
+            {messageType === 'all' ? '📋 コピー' : '💬 LINEで送る'}
+          </button>
+        )}
+      </div>
+      <div style={{fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8}}>
+        {messageType === 'all' 
+          ? (group.lineGroupUrl ? '💡 グループLINEに一括送信されます' : '💡 設定でLINEグループURLを登録すると直接送れます')
+          : '💡 個別メッセージ - LINE送信画面で送り先を選択してください'}
       </div>
     </div>
   );
@@ -2311,6 +2654,7 @@ function HelpView({ isAdmin, group }) {
         <div style={styles.table}>
           <div style={styles.tableRow}><span style={styles.tableIcon}>🏠</span><span style={styles.tableLabel}>ホーム</span><span style={styles.tableDesc}>全体の状況、次回飲み会予定</span></div>
           <div style={styles.tableRow}><span style={styles.tableIcon}>🍻</span><span style={styles.tableLabel}>飲み会</span><span style={styles.tableDesc}>出欠回答、店舗投票</span></div>
+          <div style={styles.tableRow}><span style={styles.tableIcon}>🎪</span><span style={styles.tableLabel}>イベント</span><span style={styles.tableDesc}>旅行・キャンプ等の出欠</span></div>
           <div style={styles.tableRow}><span style={styles.tableIcon}>👥</span><span style={styles.tableLabel}>メンバー</span><span style={styles.tableDesc}>メンバー一覧、入金状況</span></div>
           <div style={styles.tableRow}><span style={styles.tableIcon}>📊</span><span style={styles.tableLabel}>一覧</span><span style={styles.tableDesc}>全員の入金・受取状況</span></div>
         </div>
@@ -2327,12 +2671,51 @@ function HelpView({ isAdmin, group }) {
         <div style={styles.tip}>💡 締切日までに回答してください</div>
       </Section>
       
+      {/* 店舗の追加 */}
+      <Section title="🏮 店舗の追加・候補リスト">
+        <p style={styles.p}>誰でも店舗の追加・削除ができます。</p>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>新しい店舗を追加</div>
+          <ol style={styles.ol}>
+            <li>「🍻 飲み会」→「＋ 店舗を追加」</li>
+            <li>店舗名・URLなどを入力</li>
+            <li>登録すると候補リストにも自動保存</li>
+          </ol>
+        </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>候補リストから追加</div>
+          <ol style={styles.ol}>
+            <li>「📋 候補店舗リストから選ぶ」をタップ</li>
+            <li>過去に登録した店舗を選択</li>
+            <li>不要な店舗は「削除」で消せます</li>
+          </ol>
+        </div>
+      </Section>
+      
+      {/* イベント出欠 */}
+      <Section title="🎪 イベントの出欠回答">
+        <p style={styles.p}>旅行・キャンプ・BBQなどの出欠確認</p>
+        <ol style={styles.ol}>
+          <li>「🎪 イベント」タブを開く</li>
+          <li>自分の名前を選択</li>
+          <li>⭕（参加）/ 🔺（未定）/ ❌（不参加）をタップ</li>
+        </ol>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>過去イベントの確認</div>
+          <p style={styles.p}>「📁 過去のイベント」をタップすると、詳細や参加者が確認できます。</p>
+        </div>
+      </Section>
+      
       {/* 入金状況の確認 */}
       <Section title="💰 入金状況の確認">
         <div style={styles.table}>
           <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#d1fae5'}}>✅</span><span style={styles.tableLabel}>緑</span><span style={styles.tableDesc}>支払済み</span></div>
           <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#fee2e2'}}>　</span><span style={styles.tableLabel}>赤</span><span style={styles.tableDesc}>未払い</span></div>
           <div style={styles.tableRow}><span style={{...styles.tableIcon, background: '#fef3c7'}}>相</span><span style={styles.tableLabel}>黄</span><span style={styles.tableDesc}>受取金から相殺</span></div>
+        </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>一覧表のLINE共有</div>
+          <p style={styles.p}>「📊 一覧」タブの📱ボタンで、開始月から当月までの入金状況をLINEで共有できます。</p>
         </div>
       </Section>
       
@@ -2419,13 +2802,38 @@ function HelpView({ isAdmin, group }) {
         <ol style={styles.ol}>
           <li>飲み会を作成（日時・締切を設定）</li>
           <li>メンバーが出欠を投票</li>
-          <li>候補店舗を追加</li>
+          <li>候補店舗を追加（誰でも可）</li>
           <li>メンバーが店舗に投票</li>
           <li>幹事が店舗を確定</li>
           <li>LINE通知で全員にお知らせ</li>
           <li>開催後、経費を記録</li>
           <li>飲み会を完了にする</li>
         </ol>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>🏮 候補店舗リスト</div>
+          <p style={styles.p}>店舗を追加すると自動的に候補リストに保存されます。次回以降はリストから選んで追加できます。</p>
+        </div>
+      </Section>
+      
+      {/* イベント管理 */}
+      <Section title="🎪 イベント管理（旅行・キャンプ等）">
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>イベント作成</div>
+          <ol style={styles.ol}>
+            <li>「🎪 イベント」タブを開く</li>
+            <li>「＋」ボタンでイベント作成</li>
+            <li>種類（旅行/キャンプ/BBQ等）を選択</li>
+            <li>タイトル・日程・締切を入力</li>
+          </ol>
+        </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>締め切り・再開</div>
+          <ul style={styles.ul}>
+            <li>「🔒 締め切る」で投票終了（確認あり）</li>
+            <li>間違えた場合は「📁 過去のイベント」から再開可能</li>
+            <li>過去イベントをタップで詳細・参加者確認</li>
+          </ul>
+        </div>
       </Section>
       
       {/* 積立金管理 */}
@@ -2452,13 +2860,32 @@ function HelpView({ isAdmin, group }) {
       </Section>
       
       {/* LINE通知 */}
-      <Section title="📱 LINE通知の作成">
-        <p style={styles.p}>コピペで使えるメッセージを自動生成できます。</p>
-        <div style={styles.table}>
-          <div style={styles.tableRow}><span style={styles.tableLabel}>入金リマインド</span><span style={styles.tableDesc}>月初めに支払いを促す</span></div>
-          <div style={styles.tableRow}><span style={styles.tableLabel}>滞納催促</span><span style={styles.tableDesc}>2ヶ月以上未払いの人へ</span></div>
-          <div style={styles.tableRow}><span style={styles.tableLabel}>飲み会お知らせ</span><span style={styles.tableDesc}>日時・場所・参加者を通知</span></div>
+      <Section title="📱 LINE通知機能">
+        <p style={styles.p}>LINEグループURLを設定すると、ボタン1つで直接送信できます。</p>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>入金リマインド</div>
+          <ul style={styles.ul}>
+            <li>「📅 月別通知」: 特定月の未払い者に通知</li>
+            <li>「📋 全体サマリー」: 全月の未払い状況を一覧送信</li>
+          </ul>
         </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>滞納催促</div>
+          <ul style={styles.ul}>
+            <li>ホーム画面 or 入金画面から「📱 LINE催促メッセージ」</li>
+            <li>「👥 全員向け一括」: 滞納者全員の名前・金額をグループに送信</li>
+            <li>「👤 個別送信」: 特定の人に個別メッセージ</li>
+            <li>各メンバーの滞納月数・累計金額を表示</li>
+          </ul>
+        </div>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>その他の通知</div>
+          <ul style={styles.ul}>
+            <li>飲み会お知らせ: 日時・場所・参加者</li>
+            <li>イベント出欠: 旅行等の出欠確認</li>
+          </ul>
+        </div>
+        <div style={styles.tip}>💡 設定画面でLINEグループURLを登録してください</div>
       </Section>
       
       {/* トラブルシューティング */}
@@ -2467,6 +2894,7 @@ function HelpView({ isAdmin, group }) {
           <div style={styles.tableRow}><span style={styles.tableLabel}>ログインできない</span><span style={styles.tableDesc}>パスワードを確認</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>データが消えた</span><span style={styles.tableDesc}>再読み込みしてください</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>入金を間違えた</span><span style={styles.tableDesc}>履歴画面から「取消」</span></div>
+          <div style={styles.tableRow}><span style={styles.tableLabel}>イベント誤締切</span><span style={styles.tableDesc}>過去イベントから「再開」</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>画面が真っ白</span><span style={styles.tableDesc}>ブラウザを更新</span></div>
         </div>
       </Section>
@@ -2698,7 +3126,7 @@ function HelpView({ isAdmin, group }) {
   );
 }
 
-function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, isAdmin }) {
+function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, isAdmin, onOpenReminder, delinquents }) {
   const [selected, setSelected] = React.useState([]);
   const [multiMonth, setMultiMonth] = React.useState(false);
   const [monthRange, setMonthRange] = React.useState({ from: month, to: month });
@@ -2727,10 +3155,37 @@ function BulkPaymentView({ group, month, setMonth, getMonthlyStatus, onSubmit, i
 
   const totalMonths = getMonthsBetween().length;
   const totalAmount = (group.monthlyAmount + group.savingsAmount) * selected.length * totalMonths;
+  const totalUnpaid = delinquents ? delinquents.reduce((sum, d) => sum + d.unpaidAmount, 0) : 0;
 
   return (
     <div style={S.view}>
       <h3 style={S.viewTitle}>✅ 一括入金</h3>
+      
+      {/* 滞納催促ボタン */}
+      {delinquents && delinquents.length > 0 && (
+        <div style={{background: '#fef2f2', border: '2px solid #fecaca', borderRadius: 12, padding: 14, marginBottom: 16}}>
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10}}>
+            <span style={{fontWeight: 600, color: '#dc2626'}}>⚠️ 未払い: {delinquents.length}名</span>
+            <span style={{fontSize: 14, color: '#dc2626', fontWeight: 700}}>¥{totalUnpaid.toLocaleString()}</span>
+          </div>
+          <button 
+            onClick={onOpenReminder}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: '#06c755',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 10,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            📱 LINE催促メッセージを作成
+          </button>
+        </div>
+      )}
       
       {/* 複数月モード切り替え */}
       <div style={{marginBottom: 12}}>
@@ -3031,14 +3486,15 @@ function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDelete
               </div>
 
               {/* LINE通知・締め切りボタン */}
-              <div style={{display: 'flex', gap: 8, marginTop: 16}}>
-                <button
-                  style={{flex: 1, padding: '10px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
-                  onClick={() => {
-                    const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
-                    const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
-                    const appUrl = window.location.href.split('?')[0] + '?view=events';
-                    const msg = `【${event.title}】出欠確認
+              <div style={{display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16}}>
+                <div style={{display: 'flex', gap: 8}}>
+                  <button
+                    style={{flex: 1, padding: '10px', background: '#06c755', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
+                    onClick={() => {
+                      const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+                      const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+                      const appUrl = window.location.href.split('?')[0] + '?view=events';
+                      const msg = `【${event.title}】出欠確認
 
 📅 ${event.date || '日程未定'}
 ${event.description ? `\n${event.description}\n` : ''}
@@ -3048,22 +3504,32 @@ ${event.description ? `\n${event.description}\n` : ''}
 まだの方は回答お願いします！
 👇 投票はこちら
 ${appUrl}`;
-                    navigator.clipboard?.writeText(msg);
-                    notify('コピーしました！');
-                  }}
-                >
-                  📋 LINE用コピー
-                </button>
-                <button
-                  style={{flex: 1, padding: '10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
-                  onClick={() => {
-                    if (confirm(`「${event.title}」を締め切りますか？\n\n締め切ると投票できなくなります。`)) {
-                      onClose(event.id);
-                    }
-                  }}
-                >
-                  🔒 締め切る
-                </button>
+                      if (group.lineGroupUrl) {
+                        window.open(`https://line.me/R/msg/text/?${encodeURIComponent(msg)}`, '_blank');
+                      } else {
+                        navigator.clipboard?.writeText(msg);
+                        notify('コピーしました！LINEに貼り付けてください');
+                      }
+                    }}
+                  >
+                    {group.lineGroupUrl ? '💬 LINEで送る' : '📋 コピー'}
+                  </button>
+                  <button
+                    style={{flex: 1, padding: '10px', background: '#dc2626', color: '#fff', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer'}}
+                    onClick={() => {
+                      if (confirm(`「${event.title}」を締め切りますか？\n\n締め切ると投票できなくなります。`)) {
+                        onClose(event.id);
+                      }
+                    }}
+                  >
+                    🔒 締め切る
+                  </button>
+                </div>
+                {!group.lineGroupUrl && (
+                  <div style={{fontSize: 11, color: '#94a3b8', textAlign: 'center'}}>
+                    💡 設定でLINEグループURLを登録すると直接送れます
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -3501,7 +3967,7 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
         <>
           <div style={S.card}>
             <h4 style={S.subTitle}>📢 LINE通知</h4>
-            <button style={S.lineBtn} onClick={() => {
+            <button style={{...S.lineBtn, background: '#06c755'}} onClick={() => {
               const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
               const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
               const appUrl = window.location.href.split('?')[0] + '?view=party';
@@ -3523,10 +3989,18 @@ ${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n`
 
 👇 出欠回答はこちら
 ${appUrl}`;
-              navigator.clipboard?.writeText(msg);
-              notify('コピーしました！');
-            }}>📋 LINEメッセージをコピー</button>
-            {group.lineGroupUrl && <a href={group.lineGroupUrl} target="_blank" rel="noreferrer" style={S.lineLink}>💬 LINEを開く</a>}
+              if (group.lineGroupUrl) {
+                window.open(`https://line.me/R/msg/text/?${encodeURIComponent(msg)}`, '_blank');
+              } else {
+                navigator.clipboard?.writeText(msg);
+                notify('コピーしました！LINEに貼り付けてください');
+              }
+            }}>{group.lineGroupUrl ? '💬 LINEで送る' : '📋 コピー'}</button>
+            {!group.lineGroupUrl && (
+              <div style={{fontSize: 11, color: '#94a3b8', marginTop: 8}}>
+                💡 設定でLINEグループURLを登録すると直接送れます
+              </div>
+            )}
           </div>
 
           {/* 会計 */}
