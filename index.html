@@ -140,6 +140,7 @@ function MoaiManager() {
   const [lastConfirmedParty, setLastConfirmedParty] = React.useState(null); // 飲み会確定通知用
   const [lastConfirmedEvent, setLastConfirmedEvent] = React.useState(null); // イベント確定通知用
   const [lastReceiveInfo, setLastReceiveInfo] = React.useState(null); // 受取通知用
+  const [lastCreatedParty, setLastCreatedParty] = React.useState(null); // 飲み会作成通知用
 
   // プリセットデータ
   const createPresetData = () => ({
@@ -309,7 +310,9 @@ function MoaiManager() {
   const getTotalSavings = () => {
     const collected = getActivePayments().reduce((sum, p) => sum + (p.savings || 0), 0);
     const used = (selectedGroup?.savingsUsage || []).filter(u => u.status !== 'deleted').reduce((sum, u) => sum + u.amount, 0);
-    return collected - used;
+    // メンバーの初期残高を合計
+    const initialSavings = (selectedGroup?.members || []).reduce((sum, m) => sum + (m.initialSavings || 0), 0);
+    return collected + initialSavings - used;
   };
 
   const getTotalUnpaid = () => {
@@ -672,6 +675,14 @@ function MoaiManager() {
     setShowModal(null);
   };
 
+  // メンバー初期残高の一括更新
+  const handleUpdateMembersInitialBalance = (memberUpdates) => {
+    let updated = { ...selectedGroup, members: memberUpdates };
+    updated = addLog('初期残高設定', '', updated);
+    updateGroup(updated);
+    setShowModal(null);
+  };
+
   const handleBalanceRecord = (data) => {
     let updated = { ...selectedGroup, balanceHistory: [...(selectedGroup.balanceHistory || []), { id: `bal-${Date.now()}`, ...data }], currentBalance: data.balance };
     updated = addLog('残高記録', `¥${data.balance.toLocaleString()}`, updated);
@@ -719,7 +730,10 @@ function MoaiManager() {
     updated = addLog('飲み会作成', data.date, updated);
     updateGroup(updated);
     notify('飲み会を作成しました');
-    setShowModal(null);
+    
+    // 投票依頼通知モーダルを表示
+    setLastCreatedParty(newEvent);
+    setShowModal('partyVoteRequest');
   };
 
   const handleAddVenue = (eventId, venue) => {
@@ -779,7 +793,16 @@ function MoaiManager() {
   const handleAttendanceVote = (eventId, memberId, vote) => {
     let updated = {
       ...selectedGroup,
-      events: selectedGroup.events.map(e => e.id === eventId ? { ...e, attendance: { ...e.attendance, [memberId]: vote } } : e)
+      events: selectedGroup.events.map(e => {
+        if (e.id !== eventId) return e;
+        const newAttendance = { ...e.attendance };
+        if (vote === null) {
+          delete newAttendance[memberId];
+        } else {
+          newAttendance[memberId] = vote;
+        }
+        return { ...e, attendance: newAttendance };
+      })
     };
     updateGroup(updated);
   };
@@ -930,9 +953,16 @@ function MoaiManager() {
   const handleSpecialEventVote = (eventId, memberId, vote) => {
     let updated = {
       ...selectedGroup,
-      specialEvents: (selectedGroup.specialEvents || []).map(e => 
-        e.id === eventId ? { ...e, attendance: { ...e.attendance, [memberId]: vote } } : e
-      )
+      specialEvents: (selectedGroup.specialEvents || []).map(e => {
+        if (e.id !== eventId) return e;
+        const newAttendance = { ...e.attendance };
+        if (vote === null) {
+          delete newAttendance[memberId];
+        } else {
+          newAttendance[memberId] = vote;
+        }
+        return { ...e, attendance: newAttendance };
+      })
     };
     updateGroup(updated);
   };
@@ -1765,11 +1795,13 @@ function MoaiManager() {
           {showModal === 'createEvent' && <EventForm nextDate={getNextPartyDate()} onSubmit={handleCreateEvent} onCancel={() => setShowModal(null)} />}
           {showModal === 'editEvent' && editingEvent && <EventForm event={editingEvent} onSubmit={(data) => handleEditEvent(editingEvent.id, data)} onCancel={() => { setShowModal(null); setEditingEvent(null); }} />}
           {showModal === 'expense' && editingEvent && <ExpenseForm event={editingEvent} members={selectedGroup.members} onSubmit={(data) => handleRecordExpense(editingEvent.id, data)} onCancel={() => { setShowModal(null); setEditingEvent(null); }} />}
-          {showModal === 'settings' && <SettingsForm group={selectedGroup} onSubmit={handleUpdateGroup} onChangePassword={handleChangePassword} onCancel={() => setShowModal(null)} />}
+          {showModal === 'settings' && <SettingsForm group={selectedGroup} onSubmit={handleUpdateGroup} onChangePassword={handleChangePassword} onCancel={() => setShowModal(null)} onOpenInitialBalance={() => setShowModal('initialBalance')} />}
+          {showModal === 'initialBalance' && <InitialBalanceForm group={selectedGroup} onSubmit={handleUpdateMembersInitialBalance} onCancel={() => setShowModal('settings')} notify={notify} />}
           {showModal === 'export' && <ExportForm group={selectedGroup} getMonthList={getMonthList} getMemberPaymentForMonth={getMemberPaymentForMonth} getMemberBalance={getMemberBalance} onCancel={() => setShowModal(null)} />}
           {showModal === 'savingsUsage' && <SavingsUsageForm group={selectedGroup} totalSavings={getTotalSavings()} onSubmit={handleUseSavings} onCancel={() => setShowModal(null)} onCancelUsage={handleCancelSavingsUsage} />}
           {showModal === 'paymentReminder' && <PaymentReminderModal group={selectedGroup} month={selectedMonth} status={getMonthlyStatus(selectedMonth)} onClose={() => setShowModal(null)} notify={notify} getMonthlyStatus={getMonthlyStatus} getMonthList={getMonthList} />}
           {showModal === 'paymentThanks' && lastPaidInfo && <PaymentThanksModal group={selectedGroup} paidMembers={lastPaidInfo.members} month={lastPaidInfo.month} onClose={() => setShowModal(null)} notify={notify} />}
+          {showModal === 'partyVoteRequest' && lastCreatedParty && <PartyVoteRequestModal group={selectedGroup} event={lastCreatedParty} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'partyConfirmed' && lastConfirmedParty && <PartyConfirmedModal group={selectedGroup} event={lastConfirmedParty.event} venue={lastConfirmedParty.venue} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'eventConfirmed' && lastConfirmedEvent && <EventConfirmedModal group={selectedGroup} event={lastConfirmedEvent} onClose={() => setShowModal(null)} notify={notify} />}
           {showModal === 'receiveNotify' && lastReceiveInfo && <ReceiveNotifyModal group={selectedGroup} member={lastReceiveInfo.member} amount={lastReceiveInfo.amount} month={lastReceiveInfo.month} baseAmount={lastReceiveInfo.baseAmount} offsetAmount={lastReceiveInfo.offsetAmount} finalAmount={lastReceiveInfo.finalAmount} onClose={() => setShowModal(null)} notify={notify} />}
@@ -2089,7 +2121,7 @@ function ExpenseForm({ event, members, onSubmit, onCancel }) {
   );
 }
 
-function SettingsForm({ group, onSubmit, onChangePassword, onCancel }) {
+function SettingsForm({ group, onSubmit, onChangePassword, onCancel, onOpenInitialBalance }) {
   const [name, setName] = React.useState(group.name);
   const [monthlyAmount, setMonthlyAmount] = React.useState((group.monthlyAmount || 0) / 1000);
   const [savingsAmount, setSavingsAmount] = React.useState((group.savingsAmount || 0) / 1000);
@@ -2191,6 +2223,8 @@ function SettingsForm({ group, onSubmit, onChangePassword, onCancel }) {
       ) : (
         <button style={S.linkBtn} onClick={() => setShowPwChange(true)}>🔐 パスワード変更</button>
       )}
+      
+      <button style={{...S.linkBtn, marginTop: 8}} onClick={onOpenInitialBalance}>💰 メンバー初期残高設定</button>
     </div>
   );
 }
@@ -2213,6 +2247,108 @@ function ExportForm({ group, getMonthList, getMemberPaymentForMonth, getMemberBa
       <div style={S.btnRow}>
         <button style={S.cancelBtn} onClick={onCancel}>閉じる</button>
         <button style={S.submitBtn} onClick={handleExport}>📥 ダウンロード</button>
+      </div>
+    </div>
+  );
+}
+
+// メンバー初期残高設定フォーム
+function InitialBalanceForm({ group, onSubmit, onCancel, notify }) {
+  // 初期残高の状態（千円単位で入力）
+  const [balances, setBalances] = React.useState(() => {
+    const initial = {};
+    group.members.forEach(m => {
+      initial[m.id] = (m.initialSavings || 0) / 1000;
+    });
+    return initial;
+  });
+  const [bulkAmount, setBulkAmount] = React.useState('');
+  
+  const handleBulkSet = () => {
+    if (!bulkAmount) return;
+    const newBalances = {};
+    group.members.forEach(m => {
+      newBalances[m.id] = +bulkAmount;
+    });
+    setBalances(newBalances);
+  };
+  
+  const handleSave = () => {
+    // 各メンバーの初期残高を千円→円に変換して保存
+    const memberUpdates = group.members.map(m => ({
+      ...m,
+      initialSavings: (balances[m.id] || 0) * 1000
+    }));
+    onSubmit(memberUpdates);
+    notify('初期残高を保存しました');
+  };
+  
+  const totalInitial = Object.values(balances).reduce((sum, v) => sum + (v || 0), 0) * 1000;
+  
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>💰 メンバー初期残高設定</h3>
+      
+      <div style={{background: '#f0f9ff', padding: 12, borderRadius: 8, marginBottom: 16, border: '1px solid #bae6fd'}}>
+        <div style={{fontSize: 13, color: '#0369a1', marginBottom: 8}}>
+          💡 導入前の繰越積立金をメンバーごとに設定できます
+        </div>
+        <div style={{fontSize: 12, color: '#64748b'}}>
+          例：1年前から参加のメンバーは積立済み24千円など
+        </div>
+      </div>
+      
+      {/* 一括設定 */}
+      <div style={{background: '#f8fafc', padding: 12, borderRadius: 8, marginBottom: 16}}>
+        <div style={{fontSize: 13, fontWeight: 600, marginBottom: 8}}>📋 一括設定</div>
+        <div style={{display: 'flex', gap: 8, alignItems: 'center'}}>
+          <input 
+            type="number" 
+            value={bulkAmount} 
+            onChange={e => setBulkAmount(e.target.value)} 
+            style={{...S.input, flex: 1, margin: 0}} 
+            placeholder="金額（千円）" 
+          />
+          <button 
+            style={{...S.submitBtn, whiteSpace: 'nowrap'}} 
+            onClick={handleBulkSet}
+            disabled={!bulkAmount}
+          >
+            全員に適用
+          </button>
+        </div>
+      </div>
+      
+      {/* メンバー別設定 */}
+      <div style={{marginBottom: 16}}>
+        <div style={{fontSize: 13, fontWeight: 600, marginBottom: 8}}>👥 メンバー別設定</div>
+        <div style={{maxHeight: 300, overflow: 'auto'}}>
+          {group.members.map(m => (
+            <div key={m.id} style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 12px', background: '#f8fafc', borderRadius: 8}}>
+              <span style={{flex: 1, fontSize: 14}}>{m.name}</span>
+              <span style={{fontSize: 12, color: '#64748b'}}>¥</span>
+              <input 
+                type="number" 
+                value={balances[m.id] || ''} 
+                onChange={e => setBalances({...balances, [m.id]: e.target.value === '' ? 0 : +e.target.value})} 
+                style={{...S.input, width: 80, margin: 0, textAlign: 'right'}} 
+                placeholder="0"
+              />
+              <span style={{fontSize: 12, color: '#64748b'}}>千</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      
+      {/* 合計表示 */}
+      <div style={{background: '#ecfdf5', padding: 12, borderRadius: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+        <span style={{fontWeight: 600, color: '#059669'}}>💎 初期残高合計</span>
+        <span style={{fontSize: 18, fontWeight: 700, color: '#059669'}}>¥{totalInitial.toLocaleString()}</span>
+      </div>
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onCancel}>キャンセル</button>
+        <button style={S.submitBtn} onClick={handleSave}>保存</button>
       </div>
     </div>
   );
@@ -2515,6 +2651,7 @@ ${appUrl}`;
 function PartyConfirmedModal({ group, event, venue, onClose, notify }) {
   const att = event.attendance || {};
   const yes = Object.entries(att).filter(([_, v]) => v === 'yes').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
+  const late = Object.entries(att).filter(([_, v]) => v === 'late').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
   const maybe = Object.entries(att).filter(([_, v]) => v === 'maybe').map(([id]) => group.members.find(m => m.id === id)?.name).filter(Boolean);
   const dayOfWeek = ['日','月','火','水','木','金','土'][new Date(event.date).getDay()];
   const appUrl = window.location.href.split('?')[0] + '?view=party';
@@ -2528,10 +2665,10 @@ ${venue?.address ? `📮 住所: ${venue.address}` : ''}
 ${venue?.url ? `🔗 詳細: ${venue.url}` : ''}
 ━━━━━━━━━━━━━━━━
 
-✅ 参加確定 (${yes.length}名):
+✅ 参加 (${yes.length}名):
 ${yes.join('、') || 'なし'}
 
-${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n\n未定の方は早めに回答お願いします！\n` : ''}
+${late.length > 0 ? `🕐 遅れて参加 (${late.length}名):\n${late.join('、')}\n\n` : ''}${maybe.length > 0 ? `🔺 未定 (${maybe.length}名):\n${maybe.join('、')}\n\n未定の方は早めに回答お願いします！\n` : ''}
 皆さんの参加をお待ちしてます🍻✨
 
 👇 詳細はこちら
@@ -2554,7 +2691,7 @@ ${appUrl}`;
         <div style={{fontWeight: 600, color: '#059669', marginBottom: 6}}>✅ 予約確定</div>
         <div style={{fontSize: 14}}>{event.date} ({dayOfWeek}) {event.time || ''}</div>
         <div style={{fontSize: 14, fontWeight: 600, marginTop: 4}}>{venue?.name}</div>
-        <div style={{fontSize: 13, color: '#64748b', marginTop: 4}}>参加: {yes.length}名{maybe.length > 0 ? ` / 未定: ${maybe.length}名` : ''}</div>
+        <div style={{fontSize: 13, color: '#64748b', marginTop: 4}}>参加: {yes.length}名{late.length > 0 ? ` / 遅れ: ${late.length}名` : ''}{maybe.length > 0 ? ` / 未定: ${maybe.length}名` : ''}</div>
       </div>
       
       <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto'}}>
@@ -2733,6 +2870,69 @@ ${appUrl}`;
         <div style={{fontSize: 13, color: '#64748b', marginTop: 8}}>
           受取状況: {membersReceived}/{totalMembers}名完了
         </div>
+      </div>
+      
+      <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto'}}>
+        {message}
+      </div>
+      
+      <div style={S.btnRow}>
+        <button style={S.cancelBtn} onClick={onClose}>閉じる</button>
+        {group.lineGroupUrl ? (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleLineShare}>💬 LINEで送る</button>
+        ) : (
+          <button style={{...S.submitBtn, background: '#06c755'}} onClick={handleCopy}>📋 コピー</button>
+        )}
+      </div>
+      {!group.lineGroupUrl && (
+        <div style={{fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 8}}>
+          💡 設定でLINEグループURLを登録すると直接送れます
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 飲み会投票依頼通知メッセージ
+function PartyVoteRequestModal({ group, event, onClose, notify }) {
+  const dayOfWeek = ['日','月','火','水','木','金','土'][new Date(event.date).getDay()];
+  const appUrl = window.location.href.split('?')[0] + '?view=party';
+  const deadlineDisplay = event.deadline ? `${event.deadline.replace('-', '/')}まで` : '未定';
+  
+  const message = `🍻 ${group.name} 飲み会のお知らせ 🍻
+
+━━━━━━━━━━━━━━━━
+📅 日時: ${event.date} (${dayOfWeek}) ${event.time || ''}〜
+⏰ 回答締切: ${deadlineDisplay}
+━━━━━━━━━━━━━━━━
+
+出欠の投票をお願いします！🙏
+
+⭕ 参加
+🕐 遅れて参加
+🔺 未定
+❌ 不参加
+
+👇 投票はこちら
+${appUrl}`;
+
+  const handleCopy = () => {
+    navigator.clipboard?.writeText(message);
+    notify('コピーしました！');
+  };
+
+  const handleLineShare = () => {
+    window.open(`https://line.me/R/msg/text/?${encodeURIComponent(message)}`, '_blank');
+  };
+
+  return (
+    <div style={S.form}>
+      <h3 style={S.formTitle}>📢 飲み会投票依頼</h3>
+      
+      <div style={{background: '#fef3c7', padding: 12, borderRadius: 8, marginBottom: 12, border: '2px solid #fde68a'}}>
+        <div style={{fontWeight: 600, color: '#92400e', marginBottom: 6}}>🍻 飲み会作成完了</div>
+        <div style={{fontSize: 14}}>{event.date} ({dayOfWeek}) {event.time || ''}</div>
+        <div style={{fontSize: 13, color: '#64748b', marginTop: 4}}>締切: {deadlineDisplay}</div>
       </div>
       
       <div style={{background: '#f8fafc', padding: 14, borderRadius: 10, whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, maxHeight: 250, overflow: 'auto'}}>
@@ -3041,10 +3241,11 @@ function HelpView({ isAdmin, group }) {
         <ol style={styles.ol}>
           <li>「🍻 飲み会」タブを開く</li>
           <li>自分の名前を選択</li>
-          <li>⭕（参加）/ 🔺（未定）/ ❌（不参加）をタップ</li>
+          <li>⭕（参加）/ 🕐（遅れ）/ 🔺（未定）/ ❌（不参加）をタップ</li>
           <li>自動で保存されます！</li>
         </ol>
         <div style={styles.tip}>💡 締切日までに回答してください</div>
+        <div style={styles.tip}>💡 回答後「取消」ボタンで投票を取り消せます</div>
       </Section>
       
       {/* 店舗の追加 */}
@@ -3076,6 +3277,7 @@ function HelpView({ isAdmin, group }) {
           <li>自分の名前を選択</li>
           <li>⭕（参加）/ 🔺（未定）/ ❌（不参加）をタップ</li>
         </ol>
+        <div style={styles.tip}>💡 回答後「取消」ボタンで投票を取り消せます</div>
         <div style={styles.subSection}>
           <div style={styles.subTitle}>過去イベントの確認</div>
           <p style={styles.p}>「📁 過去のイベント」をタップすると、詳細や参加者が確認できます。</p>
@@ -3185,7 +3387,7 @@ function HelpView({ isAdmin, group }) {
       {/* 飲み会管理 */}
       <Section title="🍻 飲み会管理">
         <ol style={styles.ol}>
-          <li>飲み会を作成（日時・締切を設定）</li>
+          <li>飲み会を作成 → 投票依頼をLINE送信</li>
           <li>メンバーが出欠を投票</li>
           <li>候補店舗を追加（誰でも可）</li>
           <li>メンバーが店舗に投票</li>
@@ -3193,6 +3395,10 @@ function HelpView({ isAdmin, group }) {
           <li>開催後、経費を記録</li>
           <li>飲み会を完了にする</li>
         </ol>
+        <div style={styles.subSection}>
+          <div style={styles.subTitle}>📢 投票依頼通知</div>
+          <p style={styles.p}>飲み会作成後に自動で投票依頼画面が表示されます。誰でもLINEで送信できます。</p>
+        </div>
         <div style={styles.subSection}>
           <div style={styles.subTitle}>🏮 候補店舗リスト</div>
           <p style={styles.p}>店舗を追加すると自動的に候補リストに保存されます。次回以降はリストから選んで追加できます。</p>
@@ -3240,6 +3446,15 @@ function HelpView({ isAdmin, group }) {
           <div style={styles.tableRow}><span style={styles.tableLabel}>積立額</span><span style={styles.tableDesc}>毎月の積立金額</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>開催スケジュール</span><span style={styles.tableDesc}>第N週のX曜日を自動提案</span></div>
           <div style={styles.tableRow}><span style={styles.tableLabel}>パスワード</span><span style={styles.tableDesc}>管理者パスワードの変更</span></div>
+        </div>
+        <div style={styles.subSection}>
+          <div style={{...styles.subTitle, color: '#0ea5e9'}}>💰 メンバー初期残高設定</div>
+          <p style={styles.p}>導入前の繰越積立金をメンバーごとに設定できます。入会時期が異なるメンバーがいる場合に便利です。</p>
+          <ul style={styles.ul}>
+            <li>一括設定: 全員に同額を適用</li>
+            <li>個別設定: メンバーごとに金額を入力</li>
+            <li>積立金合計に自動反映されます</li>
+          </ul>
         </div>
       </Section>
       
@@ -3844,6 +4059,23 @@ function SpecialEventsView({ group, events, onCreateEvent, onEditEvent, onDelete
                       {v === 'yes' ? '⭕' : v === 'maybe' ? '🔺' : '❌'}
                     </button>
                   ))}
+                  {att[selectedMemberId] && (
+                    <button
+                      onClick={() => onVote(event.id, selectedMemberId, null)}
+                      style={{
+                        padding: '12px 8px',
+                        borderRadius: 10,
+                        border: 'none',
+                        background: '#e2e8f0',
+                        color: '#64748b',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        minWidth: 50
+                      }}
+                    >
+                      取消
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -4062,6 +4294,7 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
   const att = currentEvent.attendance || {};
   const counts = {
     yes: Object.values(att).filter(v => v === 'yes').length,
+    late: Object.values(att).filter(v => v === 'late').length,
     no: Object.values(att).filter(v => v === 'no').length,
     maybe: Object.values(att).filter(v => v === 'maybe').length,
   };
@@ -4108,6 +4341,7 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
         </div>
         <div style={S.voteCounts}>
           <span style={{color: '#10b981'}}>⭕{counts.yes}</span>
+          <span style={{color: '#0ea5e9'}}>🕐{counts.late || 0}</span>
           <span style={{color: '#f59e0b'}}>🔺{counts.maybe}</span>
           <span style={{color: '#ef4444'}}>❌{counts.no}</span>
         </div>
@@ -4116,19 +4350,27 @@ function PartyView({ group, isAdmin, currentEvent, pastEvents, getNextPartyDate,
             {group.members.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
           <div style={S.voteBtns}>
-            {['yes', 'maybe', 'no'].map(v => (
-              <button key={v} style={{...S.voteBtn, background: att[selectedMemberId] === v ? (v === 'yes' ? '#10b981' : v === 'maybe' ? '#f59e0b' : '#ef4444') : '#f1f5f9', color: att[selectedMemberId] === v ? '#fff' : '#64748b'}} onClick={() => onAttendanceVote(currentEvent.id, selectedMemberId, v)}>
-                {v === 'yes' ? '⭕' : v === 'maybe' ? '🔺' : '❌'}
+            {['yes', 'late', 'maybe', 'no'].map(v => (
+              <button key={v} style={{...S.voteBtn, background: att[selectedMemberId] === v ? (v === 'yes' ? '#10b981' : v === 'late' ? '#0ea5e9' : v === 'maybe' ? '#f59e0b' : '#ef4444') : '#f1f5f9', color: att[selectedMemberId] === v ? '#fff' : '#64748b', fontSize: v === 'late' ? 12 : 16}} onClick={() => onAttendanceVote(currentEvent.id, selectedMemberId, v)}>
+                {v === 'yes' ? '⭕' : v === 'late' ? '🕐遅' : v === 'maybe' ? '🔺' : '❌'}
               </button>
             ))}
+            {att[selectedMemberId] && (
+              <button 
+                style={{...S.voteBtn, background: '#f1f5f9', color: '#64748b', fontSize: 11}} 
+                onClick={() => onAttendanceVote(currentEvent.id, selectedMemberId, null)}
+              >
+                取消
+              </button>
+            )}
           </div>
         </div>
         <div style={S.attList}>
           {group.members.map(m => (
             <div key={m.id} style={S.attItem}>
               <span>{m.name}</span>
-              <span style={{color: att[m.id] === 'yes' ? '#10b981' : att[m.id] === 'maybe' ? '#f59e0b' : att[m.id] === 'no' ? '#ef4444' : '#94a3b8'}}>
-                {att[m.id] === 'yes' ? '⭕' : att[m.id] === 'maybe' ? '🔺' : att[m.id] === 'no' ? '❌' : '−'}
+              <span style={{color: att[m.id] === 'yes' ? '#10b981' : att[m.id] === 'late' ? '#0ea5e9' : att[m.id] === 'maybe' ? '#f59e0b' : att[m.id] === 'no' ? '#ef4444' : '#94a3b8'}}>
+                {att[m.id] === 'yes' ? '⭕' : att[m.id] === 'late' ? '🕐遅' : att[m.id] === 'maybe' ? '🔺' : att[m.id] === 'no' ? '❌' : '−'}
               </span>
             </div>
           ))}
