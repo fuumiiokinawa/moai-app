@@ -35,6 +35,14 @@
   <div id="root"></div>
   <script>
     // ================================
+    // アプリバージョン管理
+    // ================================
+    const APP_VERSION = 23; // バージョン番号（更新時に増やす）
+    window.appVersion = APP_VERSION;
+    window.isReadOnly = false; // 古いバージョンは読み取り専用になる
+    window.serverDataVersion = null;
+
+    // ================================
     // Supabase設定
     // ================================
     const SUPABASE_URL = 'https://ivirmauzgzrxxljbadve.supabase.co';
@@ -55,7 +63,18 @@
           const data = await res.json();
           if (data && data.length > 0) {
             this.dbId = data[0].id;
-            return { value: JSON.stringify({ groups: [data[0].data] }) };
+            const groupData = data[0].data;
+            
+            // サーバーのデータバージョンを確認
+            window.serverDataVersion = groupData?._appVersion || 0;
+            
+            // このアプリのバージョンがサーバーより古い場合は読み取り専用
+            if (APP_VERSION < window.serverDataVersion) {
+              window.isReadOnly = true;
+              console.warn(`アプリが古いバージョンです（v${APP_VERSION} < v${window.serverDataVersion}）。読み取り専用モードで動作します。`);
+            }
+            
+            return { value: JSON.stringify({ groups: [groupData] }) };
           }
           return null;
         } catch (e) {
@@ -67,9 +86,19 @@
       },
       
       async set(key, value) {
+        // 読み取り専用モードの場合は保存しない
+        if (window.isReadOnly) {
+          console.warn('読み取り専用モード: データは保存されません');
+          return { key, value, blocked: true };
+        }
+        
         try {
           const parsed = JSON.parse(value);
           const groupData = parsed.groups[0];
+          
+          // アプリバージョンをデータに埋め込む
+          groupData._appVersion = APP_VERSION;
+          groupData._lastUpdated = new Date().toISOString();
           
           if (this.dbId) {
             // 更新
@@ -135,6 +164,7 @@ function MoaiManager() {
       return false;
     }
   });
+  const [isReadOnlyMode, setIsReadOnlyMode] = React.useState(false); // 読み取り専用モード
   const [showLoginModal, setShowLoginModal] = React.useState(false);
   const [groups, setGroups] = React.useState([]);
   const [selectedGroup, setSelectedGroup] = React.useState(null);
@@ -195,6 +225,12 @@ function MoaiManager() {
     const loadData = async () => {
       try {
         const saved = await window.storage.get('moai-groups-v7');
+        
+        // 読み取り専用モードをチェック
+        if (window.isReadOnly) {
+          setIsReadOnlyMode(true);
+        }
+        
         if (saved?.value) {
           const data = JSON.parse(saved.value);
           // 自動アーカイブ処理
@@ -226,8 +262,10 @@ function MoaiManager() {
   }, []);
 
   React.useEffect(() => {
+    // 読み取り専用モードの場合は保存しない
+    if (isReadOnlyMode) return;
     if (groups.length > 0) window.storage.set('moai-groups-v7', JSON.stringify({ groups }));
-  }, [groups]);
+  }, [groups, isReadOnlyMode]);
 
   const notify = (msg, type = 'success') => {
     setNotification({ msg, type });
@@ -1060,7 +1098,29 @@ function MoaiManager() {
 
   return (
     <div style={S.container}>
-      <header style={S.header}>
+      {/* 読み取り専用モードの警告バナー */}
+      {isReadOnlyMode && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          background: 'linear-gradient(135deg, #dc2626, #b91c1c)',
+          color: '#fff',
+          padding: '12px 16px',
+          textAlign: 'center',
+          zIndex: 9999,
+          fontSize: 13,
+          fontWeight: 600,
+          boxShadow: '0 2px 10px rgba(0,0,0,0.3)'
+        }}>
+          ⚠️ このアプリは古いバージョンです。データの閲覧のみ可能です。
+          <div style={{fontSize: 11, marginTop: 4, opacity: 0.9}}>
+            変更を保存するには管理者から最新版を取得してください
+          </div>
+        </div>
+      )}
+      <header style={{...S.header, ...(isReadOnlyMode ? {marginTop: 60} : {})}}>
         <div style={S.headerInner}>
           <div style={S.logo}>
             <svg width="36" height="36" viewBox="0 0 100 100" style={{marginRight: 8}}>
